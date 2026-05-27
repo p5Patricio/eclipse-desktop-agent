@@ -29,3 +29,7 @@ audio/
 .DS_Store
 .idea/
 .vscode/
+
+# Engram project binding; ignore sync/export chunks by default
+.engram/*
+!.engram/config.json
