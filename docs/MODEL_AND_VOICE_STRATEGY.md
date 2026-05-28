@@ -9,7 +9,7 @@ Eclipse debe ser útil sin generar una factura sorpresa. La estrategia oficial d
 | Voz a texto | Local Whisper / faster-whisper / whisper.cpp | — | OpenAI/Gemini/otro STT cloud |
 | Texto a voz | Local TTS (`spd-say`/`espeak-ng` al inicio, Piper después) | MiniMax Speech si hay plan | OpenAI/ElevenLabs |
 | Cerebro LLM | MiniMax M2.7 si hay Token Plan | Modelo local vía Ollama/llama.cpp | GPT/Claude/Gemini |
-| Visión de pantalla | MiniMax API-vlm si hay plan o créditos | Modelo local multimodal futuro | GPT/Claude/Gemini vision |
+| Visión de pantalla | MiniMax Image Understanding vía CLI/MCP si está disponible | Modelo local multimodal futuro | GPT/Claude/Gemini vision |
 | Navegador | agent-browser local | Playwright local | Computer-use cloud solo en sandbox |
 
 ## Regla de producto
@@ -95,7 +95,7 @@ MiniMax encaja como proveedor económico porque:
 - Tiene API compatible con OpenAI SDK.
 - M2.7 tiene contexto grande y capacidades agentic/coding.
 - Token Plan tiene cuotas por ventana de 5 horas.
-- Incluye modalidades adicionales según plan.
+- Incluye modalidades adicionales según plan; ojo: `image-01` es generación de imagen, mientras que análisis de screenshots requiere Image Understanding vía CLI/MCP u otro endpoint específico.
 - Tiene integración documentada con OpenClaw.
 
 ### Plan recomendado si queremos pagar poco
