@@ -2,6 +2,31 @@
 
 Eclipse debe ser útil sin generar una factura sorpresa. La estrategia oficial del proyecto será **free-first**: local cuando sea posible, MiniMax como opción económica, y proveedores premium solo como fallback explícito.
 
+## Decisión de activación
+
+Eclipse debe cambiar de “solo push-to-talk” a **always-on responsable**:
+
+```txt
+daemon local siempre activo
+  -> escucha wake word local “Eclipse” con VAD/hotword
+  -> solo después activa STT completo
+  -> procesa intención, responde por TTS y vuelve a reposo
+```
+
+Esto da la sensación tipo Alexa/Jarvis sin ejecutar Whisper completo todo el día.
+
+| Modo | RAM idle aproximada | CPU idle | Privacidad | Recomendación |
+|---|---:|---|---|---|
+| Push-to-talk | 40–120 MB | ~0% | Máxima | Fallback para batería/privacidad |
+| Wake word local | 80–250 MB | Bajo | Alta si todo queda local | **Default recomendado** |
+| STT continuo | 800 MB–2.5 GB+ | Medio/alto | Riesgo alto | Evitar en MVP |
+
+El disco lo dominarán los modelos locales:
+
+- Wake-word/VAD: pequeño.
+- Whisper/faster-whisper: cientos de MB a ~1.5 GB según modelo.
+- TTS local natural tipo Piper: decenas/cientos de MB por voz.
+
 ## Decisión rápida
 
 | Necesidad | Opción por defecto | Alternativa económica | Fallback premium |
@@ -18,7 +43,8 @@ Eclipse debe ser útil sin generar una factura sorpresa. La estrategia oficial d
 
 El modo básico debe incluir:
 
-- Push-to-talk.
+- Daemon always-on con wake word local.
+- Push-to-talk fallback.
 - Transcripción local.
 - Respuesta de texto.
 - Voz local simple.
@@ -58,7 +84,7 @@ Motivos:
 - Evita costo por audio.
 - Privacidad alta.
 - Ya hay un modelo `small` cacheado.
-- Encaja con push-to-talk.
+- Encaja con wake-word porque Whisper solo se activa después de oír “Eclipse” o usar push-to-talk.
 
 ### Alternativa
 

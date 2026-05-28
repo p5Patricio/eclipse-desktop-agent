@@ -2,6 +2,8 @@
 
 Eclipse debe funcionar como copiloto silencioso o hablador según el contexto. La meta es capturar notificaciones, decidir si interrumpir, guardar lo que llegó y permitir responder después con confirmación.
 
+Eclipse correrá como daemon local always-on. Ese daemon puede escuchar notificaciones y wake word, pero no debe hacer transcripción continua del micrófono por defecto.
+
 ## Quick path
 
 1. Capturar notificaciones del bus de sesión D-Bus.
@@ -21,7 +23,7 @@ Eclipse debe funcionar como copiloto silencioso o hablador según el contexto. L
 4. Si puede hablar:
    Eclipse: "Tienes un mensaje de Instagram del grupo X: ... ¿quieres responder?"
 5. Usuario dicta respuesta.
-6. Eclipse transcribe con Whisper local.
+6. Eclipse activa STT solo después de wake word/push-to-talk y transcribe con Whisper local.
 7. Eclipse abre/prepara Instagram Web con agent-browser.
 8. Eclipse escribe borrador.
 9. Eclipse pregunta confirmación.
@@ -127,7 +129,7 @@ No para todo.
 
 | Función | ¿Necesita LLM? | Puede ser gratis/local |
 |---|---:|---:|
-| Escuchar push-to-talk con Whisper | No | Sí |
+| Escuchar wake word local y luego Whisper | No | Sí |
 | Hablar con `spd-say`/`espeak-ng` | No | Sí |
 | Capturar notificaciones | No | Sí |
 | Silenciar Instagram/Messenger | No | Sí |

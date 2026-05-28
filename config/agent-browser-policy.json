@@ -1,0 +1,26 @@
+{
+  "default": "deny",
+  "allow": [
+    "open",
+    "navigate",
+    "goto",
+    "snapshot",
+    "screenshot",
+    "get",
+    "wait",
+    "tab"
+  ],
+  "confirm": [
+    "click",
+    "fill",
+    "type",
+    "press",
+    "keyboard",
+    "upload"
+  ],
+  "deny": [
+    "cookies.clear",
+    "storage.clear",
+    "state.clear"
+  ]
+}

@@ -1,15 +1,15 @@
 # Plan de desarrollo de Eclipse
 
-Eclipse se construirá por fases para evitar un asistente riesgoso o imposible de mantener. La primera meta es un copiloto de escritorio con voz, visión de pantalla y acciones seguras con confirmación.
+Eclipse se construirá por fases para evitar un asistente riesgoso o imposible de mantener. La primera meta es un copiloto de escritorio siempre disponible, con voz, eventos proactivos, visión de pantalla y acciones seguras con confirmación.
 
 ## Resumen ejecutivo
 
 | Fase | Resultado | Riesgo principal | Criterio de salida |
 |---|---|---|---|
 | 0 | Repo, plan, seguridad base | Alcance ambiguo | Docs y estructura inicial listas |
-| 1 | Voz push-to-talk + respuesta hablada local | Latencia/calidad de voz | Eclipse escucha y responde por voz sin cloud obligatorio |
+| 1 | Daemon always-on + wake word local + respuesta hablada | Latencia/calidad de voz/privacidad | Eclipse permanece activo, despierta con “Eclipse” y responde por voz sin cloud obligatorio |
 | 2 | Visión de pantalla | Privacidad | Puede resumir pantalla con opt-in |
-| 3 | Acciones web seguras con agent-browser | Acciones incorrectas | Puede navegar/preparar borradores con refs semánticas y confirmación |
+| 3 | Orquestación multi-acción + acciones web seguras | Acciones incorrectas | Puede dividir instrucciones, abrir apps/navegador y preparar borradores con confirmación |
 | 4 | Notificaciones, foco y memoria | Datos sensibles/interrupciones | Captura, silencia, agrupa y resume eventos permitidos |
 | 5 | Integración OpenClaw | Superficie de ataque | OpenClaw probado en sandbox y conectado por bridge |
 | 6 | Modo copiloto diario | Confiabilidad | Uso cotidiano con logs, permisos y rollback |
@@ -35,13 +35,16 @@ Checklist:
 - [x] Definir estrategia free-first del MVP.
 - [ ] Crear issues por fase.
 
-## Fase 1 — Voz mínima
+## Fase 1 — Daemon always-on y voz mínima
 
-**Objetivo:** hablar con Eclipse y recibir respuesta hablada.
+**Objetivo:** que Eclipse esté activo en segundo plano, pueda reaccionar a eventos permitidos y despierte al oír “Eclipse” sin transcribir todo el audio 24/7.
 
 Componentes:
 
-- Wake mode inicial: push-to-talk.
+- Runtime always-on como daemon local.
+- Wake mode inicial recomendado: detector local de palabra clave “Eclipse”.
+- Push-to-talk como fallback de privacidad/batería.
+- Evitar `continuous_stt` por defecto.
 - STT: Whisper local, faster-whisper o whisper.cpp.
 - LLM: provider adapter con modo `free`, `budget` y `premium`.
 - TTS: `spd-say`/`espeak-ng` primero; Piper/MiniMax después.
@@ -50,12 +53,14 @@ Componentes:
 Buenas prácticas:
 
 - Guardar audio temporal fuera de git.
-- No grabar 24/7 en esta fase.
+- No transcribir 24/7 en esta fase.
+- Mostrar indicador visible cuando el micrófono esté escuchando después del wake word.
 - Mostrar transcripción antes de acciones críticas.
 
 Criterios de aceptación:
 
-- [ ] El usuario presiona una tecla y dicta una instrucción.
+- [ ] El daemon inicia y muestra estado de activación.
+- [ ] El usuario dice “Eclipse” o usa push-to-talk fallback.
 - [ ] Eclipse transcribe la instrucción con motor local.
 - [ ] Eclipse responde en voz alta.
 - [ ] La sesión queda logueada sin datos sensibles innecesarios.
@@ -78,13 +83,18 @@ Criterios de aceptación:
 - [ ] Resume la pantalla.
 - [ ] Pide permiso antes de guardar screenshot.
 
-## Fase 3 — Acciones web seguras
+## Fase 3 — Orquestación multi-acción y acciones web seguras
 
-**Objetivo:** controlar navegador de forma confiable.
+**Objetivo:** controlar navegador y apps de forma confiable, incluso cuando una sola instrucción contiene varias tareas.
 
 Componentes:
 
-- `agent-browser` para navegador aislado y snapshots con refs semánticas.
+- Planner multi-acción para dividir instrucciones por intención.
+- Grupos paralelos/dependientes para ejecutar acciones independientes a la vez.
+- Tool router para convertir `PlannedAction` en herramientas concretas.
+- Desktop app launcher para apps instaladas como YouTube Music.
+- Browser automation adapter con `agent-browser` para navegador aislado.
+- Snapshots con refs semánticas como siguiente iteración.
 - Playwright como fallback para scripts deterministas.
 - Perfiles de navegador separados.
 - Tool executor con allowlist, `--allowed-domains` y action policy.
@@ -103,6 +113,11 @@ Eclipse: Envía y registra acción.
 
 Criterios de aceptación:
 
+- [ ] “Reproduce X en YouTube Music y abre Instagram/Messenger” se divide en varias acciones.
+- [ ] `ToolRouter` prepara/ejecuta acciones low-risk en dry-run/execute.
+- [ ] `DesktopAppLauncher` descubre `.desktop` y lanza YouTube Music.
+- [ ] `AgentBrowserAdapter` prepara comandos `open/search/snapshot` con allowlist de dominio.
+- [ ] Acciones independientes se pueden ejecutar en paralelo con timeouts/cancelación.
 - [ ] Abre una URL permitida.
 - [ ] Escribe en un campo controlado.
 - [ ] No ejecuta submit sin confirmación.
@@ -131,6 +146,35 @@ Criterios de aceptación:
 - [ ] Ignora apps bloqueadas.
 - [ ] Guarda solo metadatos necesarios cuando esté en modo privado.
 - [ ] Permite borrar memoria local.
+
+## Fase 4.5 — Bridge de agentes de codificación
+
+**Objetivo:** permitir que Eclipse abra agentes como Claude Code, Gemini CLI o Codex CLI en un proyecto y les entregue un prompt estructurado a partir de una idea dictada por el usuario.
+
+Componentes:
+
+- Registro de agentes soportados y aliases de voz: “Claude Code”, “Cloud Code”, “Gemini/Hemini”, “Codex”.
+- Prompt builder con contexto de proyecto, idea, restricciones y reglas de seguridad.
+- Apertura controlada de terminal/proceso en el directorio del proyecto.
+- Confirmación antes de instalar dependencias, migrar, borrar archivos, commitear o ejecutar comandos destructivos.
+- Kill switch para detener procesos de agentes.
+
+Ejemplo de flujo:
+
+```txt
+Usuario: Eclipse, abre Claude Code en mi proyecto de portafolio y desarrolla una landing.
+Eclipse: Preparé un prompt para Claude Code. ¿Confirmas abrirlo en /ruta/proyecto?
+Usuario: Sí.
+Eclipse: Abre Claude Code, pega/envía el prompt y monitorea el proceso.
+```
+
+Criterios de aceptación:
+
+- [ ] Resuelve alias de voz al agente correcto.
+- [ ] Genera prompt seguro y estructurado.
+- [ ] Abre el agente en el proyecto confirmado.
+- [ ] Registra qué prompt entregó.
+- [ ] Requiere confirmación para acciones de alto impacto.
 
 ## Fase 5 — OpenClaw como complemento
 
@@ -185,6 +229,7 @@ Criterios de aceptación:
 - Desktop bridge Linux/Fedora KDE con D-Bus, AT-SPI, KWin y `ydotool` como último recurso.
 - Notification listener + notification rules engine.
 - Browser automation bridge con `agent-browser`.
+- Coding agent bridge para Claude Code/Gemini/Codex.
 - Voice pipeline.
 - Observability/logs.
 - Test harness para tools.
@@ -192,8 +237,9 @@ Criterios de aceptación:
 
 ## Próximo paso recomendado
 
-Crear issues de GitHub para fases 1 y 2, y empezar por un CLI local:
+Implementar el work unit de Fase 1:
 
 ```bash
-PYTHONPATH=src python -m eclipse_agent --help
+PYTHONPATH=src python -m eclipse_agent status
+PYTHONPATH=src python -m eclipse_agent resource-plan
 ```

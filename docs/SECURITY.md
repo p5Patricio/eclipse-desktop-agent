@@ -52,11 +52,25 @@ OpenClaw solo se evaluará:
 
 Por defecto:
 
-- No grabar audio continuamente.
+- Mantener daemon always-on, pero no transcribir audio continuamente.
+- Procesar wake word/VAD localmente y activar STT completo solo después de “Eclipse” o push-to-talk.
 - No guardar screenshots salvo confirmación.
 - No enviar pantalla completa si basta con texto o región reducida.
 - No persistir mensajes privados completos si solo se necesita un resumen.
 - Permitir borrar memoria local.
+
+## Agentes de codificación
+
+Abrir Claude Code, Gemini CLI o Codex CLI desde Eclipse se considera acción de **alto riesgo** porque puede modificar repositorios y ejecutar comandos.
+
+Reglas:
+
+- Eclipse puede generar el prompt y preparar el agente.
+- Debe confirmar agente, proyecto y prompt antes de abrirlo.
+- Debe pedir confirmación antes de instalaciones, migraciones, comandos destructivos, commits, push o despliegues.
+- El prompt entregado al agente debe incluir reglas contra leer/imprimir secretos.
+- Debe existir una forma de cerrar/detener el proceso del agente.
+- Se debe registrar qué prompt se entregó y en qué proyecto.
 
 ## Checklist antes de implementar una tool
 

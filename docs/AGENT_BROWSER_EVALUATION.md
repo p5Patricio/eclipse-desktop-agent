@@ -60,6 +60,16 @@ El adapter debe:
 5. Usar `--action-policy` generado por Eclipse.
 6. Guardar screenshots/logs solo si el usuario lo permite.
 
+## Estado de implementación
+
+Ya existe el primer scaffold:
+
+- `src/eclipse_agent/browser_automation.py`
+- `config/agent-browser-policy.json`
+- Integración desde `ToolRouter` para abrir web apps y búsquedas.
+
+Este scaffold todavía prepara comandos en dry-run y valida URLs/dominios. Falta instalar/probar el binario real de `agent-browser` y construir el loop de snapshots + acciones semánticas.
+
 ## Configuración segura inicial
 
 Modo recomendado para pruebas:

@@ -17,6 +17,9 @@ dev = [
   "pytest>=8",
   "ruff>=0.5",
 ]
+voice = [
+  "faster-whisper>=1.2",
+]
 
 [project.scripts]
 eclipse-agent = "eclipse_agent.main:main"

@@ -5,6 +5,8 @@ This file intentionally avoids external dependencies while the architecture is s
 
 from dataclasses import dataclass
 
+from eclipse_agent.activation import ActivationMode
+
 
 @dataclass(frozen=True)
 class EclipseConfig:
@@ -13,3 +15,4 @@ class EclipseConfig:
     environment: str = "development"
     log_level: str = "info"
     default_mode: str = "draft"
+    activation_mode: ActivationMode = ActivationMode.WAKE_WORD
