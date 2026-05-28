@@ -9,6 +9,7 @@ Input Layer
   - push-to-talk
   - wake word futuro
   - desktop notifications
+  - focus/game mode
   - screen capture
         |
         v
@@ -16,6 +17,7 @@ Perception Layer
   - speech-to-text
   - screen understanding
   - notification parser
+  - privacy filter
         |
         v
 Agent Orchestrator
@@ -23,6 +25,8 @@ Agent Orchestrator
   - context assembly
   - planning
   - safety checks
+  - cost policy
+  - notification rules
         |
         v
 Tool Executor
@@ -48,8 +52,8 @@ Verification + Response
 | `agent` | Razonamiento y tool calling | Orchestrator simple |
 | `tools` | Registro y ejecución de herramientas | Allowlist + confirmaciones |
 | `automation` | Navegador/escritorio | `agent-browser` para web; Playwright fallback |
-| `memory` | Recordatorios y contexto | SQLite local |
-| `safety` | Políticas, permisos y auditoría | Rules engine simple |
+| `memory` | Recordatorios, notificaciones y contexto | SQLite local |
+| `safety` | Políticas, permisos, costo, notificaciones y auditoría | Rules engine simple |
 | `openclaw_bridge` | Integración opcional con OpenClaw | Adapter experimental |
 
 ## Decisiones iniciales
@@ -58,7 +62,7 @@ Verification + Response
 |---|---|
 | Lenguaje base | Python para MVP por velocidad e integración; TypeScript posible para UI/realtime; Rust/Go solo si hace falta daemon endurecido. |
 | Automatización web | Evaluar `agent-browser` primero por snapshots de accesibilidad y refs semánticas; Playwright queda como fallback. |
-| Automatización desktop | PyAutoGUI/AT-SPI/xdotool según entorno, detrás de una interfaz. |
+| Automatización desktop | En Fedora KDE Wayland: D-Bus/API/AT-SPI/KWin primero; `ydotool` solo como último recurso. |
 | Memoria | SQLite local al inicio. |
 | Voz | Free-first: Whisper local para STT y TTS local simple; MiniMax/OpenAI opcionales. |
 | Seguridad | Confirmación obligatoria para acciones de impacto. |
@@ -66,15 +70,16 @@ Verification + Response
 ## Loop de ejecución
 
 1. Recibir evento: voz, texto, notificación o comando.
-2. Construir contexto mínimo necesario.
-3. Clasificar intención.
-4. Decidir si necesita observar pantalla.
-5. Proponer plan de herramientas.
-6. Evaluar política de seguridad.
-7. Ejecutar herramienta o pedir confirmación.
-8. Verificar resultado.
-9. Responder por voz/texto.
-10. Registrar evento y memoria permitida.
+2. Si es notificación, aplicar reglas de foco/silencio antes de hablar.
+3. Construir contexto mínimo necesario.
+4. Clasificar intención.
+5. Decidir si necesita observar pantalla.
+6. Proponer plan de herramientas.
+7. Evaluar política de seguridad y costo.
+8. Ejecutar herramienta o pedir confirmación.
+9. Verificar resultado.
+10. Responder por voz/texto.
+11. Registrar evento y memoria permitida.
 
 ## Interfaces internas sugeridas
 

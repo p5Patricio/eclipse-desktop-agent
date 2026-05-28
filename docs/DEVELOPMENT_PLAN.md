@@ -10,7 +10,7 @@ Eclipse se construirá por fases para evitar un asistente riesgoso o imposible d
 | 1 | Voz push-to-talk + respuesta hablada local | Latencia/calidad de voz | Eclipse escucha y responde por voz sin cloud obligatorio |
 | 2 | Visión de pantalla | Privacidad | Puede resumir pantalla con opt-in |
 | 3 | Acciones web seguras con agent-browser | Acciones incorrectas | Puede navegar/preparar borradores con refs semánticas y confirmación |
-| 4 | Notificaciones y memoria | Datos sensibles | Captura eventos permitidos y recuerda contexto |
+| 4 | Notificaciones, foco y memoria | Datos sensibles/interrupciones | Captura, silencia, agrupa y resume eventos permitidos |
 | 5 | Integración OpenClaw | Superficie de ataque | OpenClaw probado en sandbox y conectado por bridge |
 | 6 | Modo copiloto diario | Confiabilidad | Uso cotidiano con logs, permisos y rollback |
 
@@ -108,22 +108,28 @@ Criterios de aceptación:
 - [ ] No ejecuta submit sin confirmación.
 - [ ] Captura screenshot posterior para verificar.
 
-## Fase 4 — Notificaciones y memoria
+## Fase 4 — Notificaciones, foco y memoria
 
-**Objetivo:** Eclipse entiende eventos del escritorio y recuerda tareas.
+**Objetivo:** Eclipse entiende eventos del escritorio sin interrumpir cuando el usuario está ocupado.
 
 Componentes:
 
-- Listener de notificaciones del sistema.
+- Listener de notificaciones D-Bus (`org.freedesktop.Notifications`).
 - Memoria local con SQLite.
+- Reglas por app: anunciar, silenciar, agrupar, ignorar.
+- Modo foco/juego/privado.
+- Resumen de notificaciones pendientes.
 - Recordatorios.
 - Resumen diario opt-in.
 
 Criterios de aceptación:
 
 - [ ] Detecta notificaciones permitidas.
+- [ ] “No me avises de Instagram ni Messenger” silencia esas apps.
+- [ ] “Modo juego” guarda eventos sin hablar salvo allowlist/urgente.
+- [ ] “Dime qué llegó” resume la cola de notificaciones.
 - [ ] Ignora apps bloqueadas.
-- [ ] Guarda solo metadatos necesarios.
+- [ ] Guarda solo metadatos necesarios cuando esté en modo privado.
 - [ ] Permite borrar memoria local.
 
 ## Fase 5 — OpenClaw como complemento
@@ -176,7 +182,8 @@ Criterios de aceptación:
 - Tool registry con permisos.
 - Event bus interno.
 - Memory store.
-- Desktop bridge Linux.
+- Desktop bridge Linux/Fedora KDE con D-Bus, AT-SPI, KWin y `ydotool` como último recurso.
+- Notification listener + notification rules engine.
 - Browser automation bridge con `agent-browser`.
 - Voice pipeline.
 - Observability/logs.
