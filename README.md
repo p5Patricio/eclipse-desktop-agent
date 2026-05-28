@@ -7,9 +7,11 @@ Eclipse es un asistente personal de escritorio, controlado por voz, capaz de obs
 ## Quick path
 
 1. Leer [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) para entender el plan por fases.
-2. Revisar [`docs/SECURITY.md`](docs/SECURITY.md) antes de implementar automatización real.
-3. Usar [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) como guía técnica.
-4. Evaluar OpenClaw con [`docs/OPENCLAW_STRATEGY.md`](docs/OPENCLAW_STRATEGY.md), sin convertirlo todavía en dependencia crítica.
+2. Revisar [`docs/MODEL_AND_VOICE_STRATEGY.md`](docs/MODEL_AND_VOICE_STRATEGY.md) para mantener Eclipse free-first.
+3. Revisar [`docs/SECURITY.md`](docs/SECURITY.md) antes de implementar automatización real.
+4. Usar [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) como guía técnica.
+5. Evaluar [`docs/AGENT_BROWSER_EVALUATION.md`](docs/AGENT_BROWSER_EVALUATION.md) para automatización web.
+6. Evaluar OpenClaw con [`docs/OPENCLAW_STRATEGY.md`](docs/OPENCLAW_STRATEGY.md), sin convertirlo todavía en dependencia crítica.
 
 ## Principios del proyecto
 

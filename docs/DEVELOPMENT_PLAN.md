@@ -7,9 +7,9 @@ Eclipse se construirá por fases para evitar un asistente riesgoso o imposible d
 | Fase | Resultado | Riesgo principal | Criterio de salida |
 |---|---|---|---|
 | 0 | Repo, plan, seguridad base | Alcance ambiguo | Docs y estructura inicial listas |
-| 1 | Voz push-to-talk + respuesta hablada | Latencia/costos | Eclipse escucha y responde por voz |
+| 1 | Voz push-to-talk + respuesta hablada local | Latencia/calidad de voz | Eclipse escucha y responde por voz sin cloud obligatorio |
 | 2 | Visión de pantalla | Privacidad | Puede resumir pantalla con opt-in |
-| 3 | Acciones web seguras | Acciones incorrectas | Puede navegar/preparar borradores con confirmación |
+| 3 | Acciones web seguras con agent-browser | Acciones incorrectas | Puede navegar/preparar borradores con refs semánticas y confirmación |
 | 4 | Notificaciones y memoria | Datos sensibles | Captura eventos permitidos y recuerda contexto |
 | 5 | Integración OpenClaw | Superficie de ataque | OpenClaw probado en sandbox y conectado por bridge |
 | 6 | Modo copiloto diario | Confiabilidad | Uso cotidiano con logs, permisos y rollback |
@@ -32,8 +32,8 @@ Checklist:
 
 - [x] Nombre del asistente definido: **Eclipse**.
 - [x] Estrategia híbrida: runtime propio + OpenClaw como alternativa/complemento.
+- [x] Definir estrategia free-first del MVP.
 - [ ] Crear issues por fase.
-- [ ] Definir stack final del MVP.
 
 ## Fase 1 — Voz mínima
 
@@ -42,9 +42,9 @@ Checklist:
 Componentes:
 
 - Wake mode inicial: push-to-talk.
-- STT: proveedor intercambiable.
-- LLM: provider adapter.
-- TTS: respuesta hablada.
+- STT: Whisper local, faster-whisper o whisper.cpp.
+- LLM: provider adapter con modo `free`, `budget` y `premium`.
+- TTS: `spd-say`/`espeak-ng` primero; Piper/MiniMax después.
 - CLI local para probar.
 
 Buenas prácticas:
@@ -56,7 +56,7 @@ Buenas prácticas:
 Criterios de aceptación:
 
 - [ ] El usuario presiona una tecla y dicta una instrucción.
-- [ ] Eclipse transcribe la instrucción.
+- [ ] Eclipse transcribe la instrucción con motor local.
 - [ ] Eclipse responde en voz alta.
 - [ ] La sesión queda logueada sin datos sensibles innecesarios.
 
@@ -84,9 +84,10 @@ Criterios de aceptación:
 
 Componentes:
 
-- Playwright para navegador aislado.
+- `agent-browser` para navegador aislado y snapshots con refs semánticas.
+- Playwright como fallback para scripts deterministas.
 - Perfiles de navegador separados.
-- Tool executor con allowlist.
+- Tool executor con allowlist, `--allowed-domains` y action policy.
 - Confirmación antes de submit/enviar.
 
 Ejemplo de flujo:
@@ -170,12 +171,13 @@ Criterios de aceptación:
 
 ## Backlog técnico
 
-- Provider adapters: OpenAI, Anthropic, Gemini, local.
+- Provider router con `CostPolicy`.
+- Provider adapters: local, MiniMax, OpenAI, Anthropic, Gemini.
 - Tool registry con permisos.
 - Event bus interno.
 - Memory store.
 - Desktop bridge Linux.
-- Browser automation bridge.
+- Browser automation bridge con `agent-browser`.
 - Voice pipeline.
 - Observability/logs.
 - Test harness para tools.

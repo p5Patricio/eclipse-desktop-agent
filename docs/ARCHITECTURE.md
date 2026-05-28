@@ -47,7 +47,7 @@ Verification + Response
 | `vision` | Capturas y análisis de pantalla | Screenshot opt-in |
 | `agent` | Razonamiento y tool calling | Orchestrator simple |
 | `tools` | Registro y ejecución de herramientas | Allowlist + confirmaciones |
-| `automation` | Navegador/escritorio | Playwright primero |
+| `automation` | Navegador/escritorio | `agent-browser` para web; Playwright fallback |
 | `memory` | Recordatorios y contexto | SQLite local |
 | `safety` | Políticas, permisos y auditoría | Rules engine simple |
 | `openclaw_bridge` | Integración opcional con OpenClaw | Adapter experimental |
@@ -56,11 +56,11 @@ Verification + Response
 
 | Tema | Decisión |
 |---|---|
-| Lenguaje base | Python para MVP por velocidad e integración con automatización. |
-| Automatización web | Playwright antes que clicks visuales. |
+| Lenguaje base | Python para MVP por velocidad e integración; TypeScript posible para UI/realtime; Rust/Go solo si hace falta daemon endurecido. |
+| Automatización web | Evaluar `agent-browser` primero por snapshots de accesibilidad y refs semánticas; Playwright queda como fallback. |
 | Automatización desktop | PyAutoGUI/AT-SPI/xdotool según entorno, detrás de una interfaz. |
 | Memoria | SQLite local al inicio. |
-| Voz | Provider adapter para poder usar OpenAI/Claude/Gemini/local según convenga. |
+| Voz | Free-first: Whisper local para STT y TTS local simple; MiniMax/OpenAI opcionales. |
 | Seguridad | Confirmación obligatoria para acciones de impacto. |
 
 ## Loop de ejecución
@@ -102,9 +102,22 @@ class ProviderAdapter:
 | Copilot | Ejecuta acciones reversibles y pide confirmación en acciones sensibles. |
 | Autonomous | Solo para tareas allowlist de bajo riesgo. No usar al inicio. |
 
+## Provider router y costo
+
+Eclipse debe rutear modelos según costo y privacidad:
+
+| Modo | Regla |
+|---|---|
+| `free` | Solo STT/TTS/modelos/herramientas locales. |
+| `budget` | Permite MiniMax con cuotas/límites diarios. |
+| `premium` | Permite OpenAI/Claude/Gemini solo cuando el usuario lo active. |
+
+El MVP debe funcionar en modo `free`.
+
 ## Dependencias externas opcionales
 
+- `agent-browser`: automatización web para agentes con refs semánticas.
 - OpenClaw: gateway/canales/plugins.
 - MCP servers: herramientas estandarizadas.
-- Model providers: OpenAI, Anthropic, Gemini, local.
+- Model providers: MiniMax, OpenAI, Anthropic, Gemini, local.
 - Screen/memory tools: evaluar alternativas local-first.
