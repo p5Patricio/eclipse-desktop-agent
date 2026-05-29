@@ -22,6 +22,9 @@ data/
 logs/
 screenshots/
 audio/
+.wakeword-training/
+models/*.onnx
+!models/.gitkeep
 *.sqlite
 *.db
 

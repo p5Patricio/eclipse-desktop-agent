@@ -9,7 +9,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from eclipse_agent.planner import ActionKind, ActionPlan, AvailableTool, PlannedAction
+from eclipse_agent.planner import (
+    ActionKind,
+    ActionPlan,
+    AvailableTool,
+    PlannedAction,
+    VisionAdapter,
+    VisionAnalysisResult,
+)
 from eclipse_agent.safety import RiskLevel, evaluate_risk
 
 
@@ -92,6 +99,13 @@ class MCPClientProtocol(Protocol):
         """Call a discovered MCP tool and return the raw SDK result."""
 
 
+class VisionAdapterProtocol(Protocol):
+    """Protocol for screenshot analysis adapters."""
+
+    def analyze_image(self, image_path: str | Path, *, prompt: str) -> VisionAnalysisResult:
+        """Analyze a screenshot path and return a vision result."""
+
+
 class MCPToolClient:
     """Official MCP SDK client facade for local STDIO servers."""
 
@@ -172,9 +186,11 @@ class ToolRouter:
         *,
         mcp_client: MCPClientProtocol | None = None,
         static_tools: tuple[MCPToolDefinition, ...] = (),
+        vision_adapter: VisionAdapterProtocol | None = None,
     ) -> None:
         self.mcp_client = mcp_client or MCPToolClient()
         self.static_tools = static_tools
+        self.vision_adapter = vision_adapter or VisionAdapter()
         self._tool_cache: tuple[MCPToolDefinition, ...] | None = None
 
     @classmethod
@@ -256,16 +272,34 @@ class ToolRouter:
                 metadata=_string_metadata(action, arguments),
             )
 
+        structured_content = _structured_content(raw_result)
+        message = _render_mcp_call_result(raw_result)
+        success = not bool(getattr(raw_result, "isError", False))
+        vision_result = self._maybe_analyze_screenshot(
+            action=action,
+            tool=tool,
+            arguments=arguments,
+            structured_content=structured_content,
+            tool_success=success,
+        )
+        if vision_result is not None:
+            structured_content = _merge_vision_result(structured_content, vision_result)
+            success = success and vision_result.success
+            if vision_result.success:
+                message = f"{message}\nVision analysis: {vision_result.text}"
+            else:
+                message = f"{message}\nVision analysis failed: {vision_result.message}"
+
         return ToolExecutionResult(
             action_id=action.id,
             tool_name=tool.qualified_name,
-            success=not bool(getattr(raw_result, "isError", False)),
+            success=success,
             executed=True,
             requires_confirmation=False,
-            message=_render_mcp_call_result(raw_result),
+            message=message,
             command=_server_command_for(self.mcp_client, tool),
             metadata=_string_metadata(action, arguments),
-            structured_content=_structured_content(raw_result),
+            structured_content=structured_content,
         )
 
     def _blocked_by_confirmation(
@@ -307,6 +341,30 @@ class ToolRouter:
             if action.kind in tool.action_kinds:
                 return tool
         return None
+
+    def _maybe_analyze_screenshot(
+        self,
+        *,
+        action: PlannedAction,
+        tool: MCPToolDefinition,
+        arguments: dict[str, Any],
+        structured_content: dict[str, Any] | None,
+        tool_success: bool,
+    ) -> VisionAnalysisResult | None:
+        if not tool_success or not _requires_vision(action, tool):
+            return None
+        image_path = _extract_image_path(action, arguments, structured_content)
+        if image_path is None:
+            return VisionAnalysisResult(
+                success=False,
+                model="unavailable",
+                image_path=Path(""),
+                message="Screenshot action did not return an image path for vision analysis.",
+            )
+        return self.vision_adapter.analyze_image(
+            image_path,
+            prompt=_vision_prompt_for(action),
+        )
 
 
 def load_mcp_server_configs(path: str | Path | None) -> tuple[MCPServerConfig, ...]:
@@ -390,6 +448,8 @@ def _infer_action_kinds(
         kinds.append(ActionKind.OPEN_CODING_AGENT)
     if any(token in haystack for token in ("ydotool", "native input", "mouse", "keyboard")):
         kinds.append(ActionKind.NATIVE_INPUT)
+    if any(token in haystack for token in ("screenshot", "screen capture", "grim")):
+        kinds.append(ActionKind.SCREENSHOT)
     if not kinds:
         kinds.append(ActionKind.MCP_TOOL)
     return tuple(dict.fromkeys(kinds))
@@ -421,7 +481,7 @@ def _infer_risk_level(
         )
     ):
         return RiskLevel.HIGH
-    if any(token in haystack for token in ("search", "read", "snapshot", "inspect")):
+    if any(token in haystack for token in ("search", "read", "snapshot", "inspect", "screenshot")):
         return RiskLevel.MEDIUM
     return RiskLevel.LOW
 
@@ -465,6 +525,91 @@ def _string_metadata(action: PlannedAction, arguments: dict[str, Any]) -> dict[s
         "kind": action.kind.value,
         "arguments": json.dumps(arguments, sort_keys=True),
     }
+
+
+def _requires_vision(action: PlannedAction, tool: MCPToolDefinition) -> bool:
+    if action.kind is ActionKind.SCREENSHOT:
+        return True
+    haystack = " ".join(
+        (
+            action.tool_name or "",
+            action.target,
+            action.description,
+            tool.qualified_name,
+            tool.description,
+        )
+    )
+    return any(
+        token in haystack.casefold()
+        for token in (
+            "screenshot",
+            "screen capture",
+            "vision",
+            "visual",
+            "analyze screen",
+            "grim",
+        )
+    )
+
+
+def _extract_image_path(
+    action: PlannedAction,
+    arguments: dict[str, Any],
+    structured_content: dict[str, Any] | None,
+) -> Path | None:
+    for source in (structured_content or {}, arguments, action.parameters):
+        for key in (
+            "image_path",
+            "screenshot_path",
+            "output_path",
+            "path",
+            "file_path",
+            "filename",
+        ):
+            value = source.get(key)
+            path = _path_if_image(value)
+            if path is not None:
+                return path
+    return None
+
+
+def _path_if_image(value: object) -> Path | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = Path(value).expanduser()
+    if path.suffix.casefold() not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
+        return None
+    return path
+
+
+def _vision_prompt_for(action: PlannedAction) -> str:
+    prompt = action.parameters.get("vision_prompt")
+    if isinstance(prompt, str) and prompt.strip():
+        return prompt
+    return (
+        "Analyze this screenshot for the user's request and return concise, actionable "
+        f"observations. Action target: {action.target}. Action description: {action.description}."
+    )
+
+
+def _merge_vision_result(
+    structured_content: dict[str, Any] | None,
+    vision_result: VisionAnalysisResult,
+) -> dict[str, Any]:
+    merged = dict(structured_content or {})
+    if vision_result.success:
+        merged["vision_analysis"] = {
+            "model": vision_result.model,
+            "image_path": str(vision_result.image_path),
+            "text": vision_result.text,
+        }
+    else:
+        merged["vision_error"] = {
+            "model": vision_result.model,
+            "image_path": str(vision_result.image_path),
+            "message": vision_result.message,
+        }
+    return merged
 
 
 def _jsonable(value: object) -> dict[str, Any]:

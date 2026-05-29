@@ -28,6 +28,15 @@ voice = [
   "faster-whisper>=1.2",
   "sounddevice>=0.4",
 ]
+wakeword-training = [
+  "onnx>=1.15",
+  "PyYAML>=6.0",
+  "scipy>=1.11",
+  "torch>=2.2",
+  "torchinfo>=1.8",
+  "torchmetrics>=1.3",
+  "tqdm>=4.66",
+]
 
 [project.scripts]
 eclipse-agent = "eclipse_agent.main:main"

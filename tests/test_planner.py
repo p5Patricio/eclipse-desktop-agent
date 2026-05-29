@@ -8,6 +8,9 @@ from eclipse_agent.planner import (
     LLMPlanner,
     LLMPlannerConfig,
     PlannedAction,
+    VisionAdapter,
+    VisionAdapterConfig,
+    build_vision_config_from_env,
     build_planner_config_from_env,
     create_action_plan,
 )
@@ -52,6 +55,43 @@ class FakeOpenAIClient:
         self.chat = FakeChat(plan)
 
 
+@dataclass
+class FakeVisionMessage:
+    content: str
+
+
+@dataclass
+class FakeVisionChoice:
+    message: FakeVisionMessage
+
+
+@dataclass
+class FakeVisionCompletion:
+    choices: list[FakeVisionChoice]
+
+
+class FakeVisionCompletions:
+    def __init__(self, text: str | None = "The screenshot shows a terminal.") -> None:
+        self.text = text
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.text is None:
+            raise RuntimeError("model 'qwen2-vl:7b' not found, try pulling it")
+        return FakeVisionCompletion(choices=[FakeVisionChoice(FakeVisionMessage(self.text))])
+
+
+class FakeVisionChat:
+    def __init__(self, text: str | None = "The screenshot shows a terminal.") -> None:
+        self.completions = FakeVisionCompletions(text)
+
+
+class FakeVisionClient:
+    def __init__(self, text: str | None = "The screenshot shows a terminal.") -> None:
+        self.chat = FakeVisionChat(text)
+
+
 def test_plans_media_and_multiple_browser_apps_from_single_instruction():
     plan = create_action_plan(
         "Reproduce El lado oscuro de Jarabe de Palo en YouTube Music, "
@@ -77,6 +117,14 @@ def test_search_action_is_medium_risk_browser_work():
     assert plan.actions[0].kind is ActionKind.BROWSER_SEARCH
     assert plan.actions[0].risk_level is RiskLevel.MEDIUM
     assert "RTX 5090" in plan.actions[0].parameters["query"]
+
+
+def test_screen_question_plans_screenshot_action():
+    plan = create_action_plan("What is on my screen?")
+
+    assert plan.actions[0].kind is ActionKind.SCREENSHOT
+    assert plan.actions[0].tool_name == "wayland.screenshot"
+    assert "vision_prompt" in plan.actions[0].parameters
 
 
 def test_coding_agent_action_requires_confirmation():
@@ -148,6 +196,47 @@ def test_build_planner_config_defaults_to_ollama_qwen(monkeypatch):
     assert config.base_url == "http://localhost:11434/v1"
     assert config.model == "qwen2.5:7b"
     assert config.api_key == "ollama"
+
+
+def test_build_vision_config_defaults_to_ollama_qwen_vl(monkeypatch):
+    monkeypatch.delenv("ECLIPSE_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("ECLIPSE_VISION_MODEL", raising=False)
+    monkeypatch.delenv("ECLIPSE_LLM_API_KEY", raising=False)
+
+    config = build_vision_config_from_env()
+
+    assert config.base_url == "http://localhost:11434/v1"
+    assert config.model == "qwen2-vl:7b"
+    assert config.api_key == "ollama"
+
+
+def test_vision_adapter_sends_openai_compatible_image_payload(tmp_path):
+    image_path = tmp_path / "screen.jpg"
+    image_path.write_bytes(b"\xff\xd8fake-jpeg\xff\xd9")
+    client = FakeVisionClient()
+    adapter = VisionAdapter(VisionAdapterConfig(model="qwen2-vl:7b"), client=client)
+
+    result = adapter.analyze_image(image_path, prompt="Describe the screen.")
+
+    assert result.success is True
+    assert result.text == "The screenshot shows a terminal."
+    call = client.chat.completions.calls[0]
+    assert call["model"] == "qwen2-vl:7b"
+    content = call["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": "Describe the screen."}
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+def test_vision_adapter_reports_missing_ollama_model(tmp_path):
+    image_path = tmp_path / "screen.jpg"
+    image_path.write_bytes(b"\xff\xd8fake-jpeg\xff\xd9")
+    adapter = VisionAdapter(client=FakeVisionClient(text=None))
+
+    result = adapter.analyze_image(image_path, prompt="Describe the screen.")
+
+    assert result.success is False
+    assert "ollama pull qwen2-vl:7b" in result.message
 
 
 def _smart_browser_plan(instruction: str) -> ActionPlan:

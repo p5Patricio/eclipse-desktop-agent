@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from enum import StrEnum
 from typing import Any
 
@@ -17,6 +21,7 @@ from eclipse_agent.telemetry import ExecutionTelemetryStore, TelemetryLayer
 
 DEFAULT_LOCAL_LLM_BASE_URL = "http://localhost:11434/v1"
 DEFAULT_LOCAL_LLM_MODEL = "qwen2.5:7b"
+DEFAULT_LOCAL_VISION_MODEL = "qwen2-vl:7b"
 DEFAULT_LOCAL_LLM_API_KEY = "ollama"
 
 
@@ -28,6 +33,7 @@ class ActionKind(StrEnum):
     BROWSER_SEARCH = "browser_search"
     OPEN_CODING_AGENT = "open_coding_agent"
     MCP_TOOL = "mcp_tool"
+    SCREENSHOT = "screenshot"
     NATIVE_INPUT = "native_input"
     UNKNOWN = "unknown"
 
@@ -151,6 +157,116 @@ class LLMPlannerConfig(BaseModel):
 
 
 OpenAICompatiblePlannerConfig = LLMPlannerConfig
+
+
+class VisionAdapterConfig(BaseModel):
+    """Configuration for Eclipse's local OpenAI-compatible vision endpoint."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    base_url: str = DEFAULT_LOCAL_LLM_BASE_URL
+    model: str = DEFAULT_LOCAL_VISION_MODEL
+    api_key: str = DEFAULT_LOCAL_LLM_API_KEY
+    timeout_seconds: float = Field(default=60.0, gt=0)
+    max_tokens: int = Field(default=1200, gt=0)
+
+
+@dataclass(frozen=True)
+class VisionAnalysisResult:
+    """Result of sending an image to the local multimodal model."""
+
+    success: bool
+    model: str
+    image_path: Path
+    message: str
+    text: str = ""
+
+
+class VisionAdapter:
+    """Analyze screenshots with a local OpenAI-compatible multimodal model.
+
+    Eclipse keeps the default text planner on ``qwen2.5:7b``. This adapter only
+    overrides the model name to ``qwen2-vl:7b`` for screenshot/image requests,
+    allowing Ollama to unload the text model and load the vision model on demand.
+    """
+
+    def __init__(
+        self,
+        config: VisionAdapterConfig | None = None,
+        *,
+        client: object | None = None,
+    ) -> None:
+        self.config = config or VisionAdapterConfig()
+        self._client = client
+
+    @property
+    def client(self) -> object:
+        """Return the injected client or lazily construct the official OpenAI client."""
+
+        if self._client is None:
+            try:
+                from openai import OpenAI
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "The official 'openai' Python package is required for vision routing."
+                ) from exc
+            self._client = OpenAI(
+                api_key=self.config.api_key,
+                base_url=self.config.base_url,
+                timeout=self.config.timeout_seconds,
+            )
+        return self._client
+
+    def analyze_image(self, image_path: str | Path, *, prompt: str) -> VisionAnalysisResult:
+        """Analyze one image with the configured local multimodal model."""
+
+        path = Path(image_path).expanduser()
+        if not path.exists():
+            return VisionAnalysisResult(
+                success=False,
+                model=self.config.model,
+                image_path=path,
+                message=f"Screenshot image does not exist: {path}",
+            )
+        if not path.is_file():
+            return VisionAnalysisResult(
+                success=False,
+                model=self.config.model,
+                image_path=path,
+                message=f"Screenshot path is not a file: {path}",
+            )
+
+        try:
+            messages = build_vision_messages(prompt=prompt, image_path=path)
+            completion = self.client.chat.completions.create(  # type: ignore[attr-defined]
+                model=self.config.model,
+                messages=messages,
+                temperature=0,
+                max_tokens=self.config.max_tokens,
+            )
+            text = _completion_text(completion)
+        except Exception as exc:  # noqa: BLE001
+            return VisionAnalysisResult(
+                success=False,
+                model=self.config.model,
+                image_path=path,
+                message=_vision_exception_message(exc, self.config.model),
+            )
+
+        if not text:
+            return VisionAnalysisResult(
+                success=False,
+                model=self.config.model,
+                image_path=path,
+                message="Vision model returned an empty response.",
+            )
+        return VisionAnalysisResult(
+            success=True,
+            model=self.config.model,
+            image_path=path,
+            message="Vision analysis completed.",
+            text=text,
+        )
 
 
 class LLMPlanner:
@@ -321,6 +437,53 @@ def build_planner_config_from_env(
     )
 
 
+def build_vision_config_from_env(
+    *,
+    endpoint_url: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    api_key_env: str | None = None,
+) -> VisionAdapterConfig:
+    """Build local vision config from CLI values and environment defaults."""
+
+    resolved_key = api_key
+    if not resolved_key and api_key_env:
+        resolved_key = os.environ.get(api_key_env)
+    return VisionAdapterConfig(
+        base_url=endpoint_url or os.environ.get("ECLIPSE_LLM_BASE_URL", DEFAULT_LOCAL_LLM_BASE_URL),
+        model=model or os.environ.get("ECLIPSE_VISION_MODEL", DEFAULT_LOCAL_VISION_MODEL),
+        api_key=resolved_key or os.environ.get("ECLIPSE_LLM_API_KEY", DEFAULT_LOCAL_LLM_API_KEY),
+    )
+
+
+def build_vision_messages(*, prompt: str, image_path: str | Path) -> list[dict[str, Any]]:
+    """Build an OpenAI-compatible multimodal chat payload for one image."""
+
+    normalized_prompt = " ".join(prompt.strip().split())
+    if not normalized_prompt:
+        raise ValueError("Vision prompt cannot be empty.")
+    path = Path(image_path).expanduser()
+    image_data_url = encode_image_as_data_url(path)
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": normalized_prompt},
+                {"type": "image_url", "image_url": {"url": image_data_url}},
+            ],
+        }
+    ]
+
+
+def encode_image_as_data_url(image_path: str | Path) -> str:
+    """Read an image and encode it as an OpenAI-compatible data URL."""
+
+    path = Path(image_path).expanduser()
+    mime_type = _image_mime_type(path)
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
 def build_llm_planner_messages(
     *,
     instruction: str,
@@ -397,6 +560,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     search_action = _maybe_browser_search_action(clause, lowered, start_index)
     if search_action:
         return (search_action,)
+
+    screenshot_action = _maybe_screenshot_action(clause, lowered, start_index)
+    if screenshot_action:
+        return (screenshot_action,)
 
     return (
         PlannedAction(
@@ -482,6 +649,36 @@ def _maybe_browser_search_action(clause: str, lowered: str, index: int) -> Plann
     )
 
 
+def _maybe_screenshot_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(
+        token in lowered
+        for token in (
+            "screenshot",
+            "screen shot",
+            "captura",
+            "pantalla",
+            "what is on my screen",
+            "what's on my screen",
+            "look at my screen",
+        )
+    ):
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.SCREENSHOT,
+        description="Capture and analyze the current screen with the local vision model.",
+        risk_level=RiskLevel.MEDIUM,
+        target="current-screen",
+        parameters={
+            "vision_prompt": (
+                "Analyze this screenshot for the user's request and return concise, "
+                f"actionable observations. User request: {clause}"
+            )
+        },
+        tool_name="wayland.screenshot",
+    )
+
+
 def _maybe_coding_agent_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
     if not any(verb in lowered for verb in ("abre", "abrir", "lanza", "inicia")):
         return None
@@ -510,10 +707,52 @@ def _strip_json_fences(content: str) -> str:
     return stripped.strip()
 
 
+def _completion_text(completion: object) -> str:
+    choices = getattr(completion, "choices", None)
+    if not choices:
+        return ""
+    message = getattr(choices[0], "message", None)
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+            elif hasattr(item, "text"):
+                text = getattr(item, "text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(part.strip() for part in parts if part.strip())
+    return ""
+
+
+def _image_mime_type(path: Path) -> str:
+    mime_type, _encoding = mimetypes.guess_type(path.name)
+    if mime_type in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+        return mime_type
+    return "image/jpeg"
+
+
+def _vision_exception_message(exc: Exception, model: str) -> str:
+    detail = str(exc).strip() or exc.__class__.__name__
+    lowered = detail.casefold()
+    if "model" in lowered and any(token in lowered for token in ("not found", "404", "pull")):
+        return (
+            f"Vision model '{model}' is not available in Ollama. "
+            f"Run scripts/setup_local_llm.sh or 'ollama pull {model}'. "
+            f"Provider error: {detail}"
+        )
+    return f"Vision analysis failed with model '{model}': {detail}"
+
+
 STRUCTURED_PLANNER_SYSTEM_PROMPT = """You are Eclipse's local deterministic desktop-agent planner.
 Return only an object matching the supplied ActionPlan schema.
 Use the available_tools list whenever possible. Prefer selecting a concrete
 MCP tool name in PlannedAction.tool_name. Never invent secret values.
+For visual questions about the current screen or screenshots, choose the
+screenshot action kind and a concrete screenshot tool when available.
 Preserve Safety-first and Draft-first behavior: classify risk conservatively.
 Use medium, high, or critical risk when an action can affect external state,
 requires credentials, sends messages, controls native input, modifies files,

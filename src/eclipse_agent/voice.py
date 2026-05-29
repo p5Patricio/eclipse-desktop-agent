@@ -11,6 +11,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Iterable, Protocol
 
+DEFAULT_WAKE_WORD_MODEL_NAME = "eclipse.onnx"
+
 
 class TTSProvider(StrEnum):
     """Supported local text-to-speech providers."""
@@ -350,7 +352,13 @@ class OpenWakeWordTrigger:
         frame_source: Iterable[object] | None = None,
     ) -> None:
         self.wake_phrase = wake_phrase
-        self.model_paths = tuple(Path(path).expanduser() for path in model_paths)
+        explicit_model_paths = tuple(Path(path).expanduser() for path in model_paths)
+        if explicit_model_paths:
+            self.model_paths = explicit_model_paths
+        elif model is None:
+            self.model_paths = (default_wake_word_model_path(),)
+        else:
+            self.model_paths = ()
         self.threshold = threshold
         self.sample_rate = sample_rate
         self.frame_duration_ms = frame_duration_ms
@@ -364,13 +372,24 @@ class OpenWakeWordTrigger:
         return int(self.sample_rate * self.frame_duration_ms / 1000)
 
     def status(self) -> WakeWordStatus:
-        """Return whether openwakeword and an audio streaming backend are importable."""
+        """Return whether openwakeword, audio streaming, and the Eclipse model are ready."""
 
         try:
             import openwakeword  # noqa: F401
             import sounddevice  # noqa: F401
         except ModuleNotFoundError as exc:
             return WakeWordStatus(False, self.provider, f"Missing Python module: {exc.name}.")
+        missing = tuple(path for path in self.model_paths if not path.exists())
+        if missing:
+            labels = ", ".join(str(path) for path in missing)
+            return WakeWordStatus(
+                False,
+                self.provider,
+                (
+                    "Custom Eclipse wake-word model is missing. "
+                    f"Expected: {labels}. Generate it with scripts/generate_wakeword.py."
+                ),
+            )
         return WakeWordStatus(True, self.provider, "openwakeword and sounddevice are available.")
 
     def listen(
@@ -446,20 +465,18 @@ class OpenWakeWordTrigger:
 
     def _load_model(self) -> WakeWordModel:
         try:
-            from openwakeword import utils as openwakeword_utils
             from openwakeword.model import Model
         except ModuleNotFoundError as exc:
             raise RuntimeError(f"Missing Python module: {exc.name}.") from exc
 
-        if self.model_paths:
-            missing = tuple(path for path in self.model_paths if not path.exists())
-            if missing:
-                labels = ", ".join(str(path) for path in missing)
-                raise ValueError(f"Wake-word model file does not exist: {labels}")
-            return Model(wakeword_models=[str(path) for path in self.model_paths])
-
-        openwakeword_utils.download_models()
-        return Model()
+        missing = tuple(path for path in self.model_paths if not path.exists())
+        if missing:
+            labels = ", ".join(str(path) for path in missing)
+            raise ValueError(
+                "Wake-word model file does not exist: "
+                f"{labels}. Generate the Eclipse model with scripts/generate_wakeword.py."
+            )
+        return Model(wakeword_models=[str(path) for path in self.model_paths])
 
     def _best_relevant_prediction(self, prediction: dict[str, float]) -> tuple[str, float]:
         """Return the highest wake-phrase score from one model prediction."""
@@ -558,8 +575,32 @@ def _default_audio_path() -> Path:
     return Path(tempfile.gettempdir()) / "eclipse-listen.wav"
 
 
+def default_wake_word_model_path() -> Path:
+    """Return the designated custom openwakeword model path for the Eclipse phrase."""
+
+    explicit_path = _path_from_env("ECLIPSE_WAKEWORD_MODEL_PATH")
+    if explicit_path:
+        return explicit_path
+
+    models_dir = _path_from_env("ECLIPSE_MODELS_DIR")
+    if models_dir:
+        return models_dir / DEFAULT_WAKE_WORD_MODEL_NAME
+
+    project_root = Path(__file__).resolve().parents[2]
+    return project_root / "models" / DEFAULT_WAKE_WORD_MODEL_NAME
+
+
 def _default_runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, text=True, capture_output=True, check=False)  # noqa: S603
+
+
+def _path_from_env(name: str) -> Path | None:
+    import os
+
+    value = os.environ.get(name)
+    if not value:
+        return None
+    return Path(value).expanduser()
 
 
 def shlex_join(command: tuple[str, ...]) -> str:

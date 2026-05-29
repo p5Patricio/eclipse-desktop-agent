@@ -8,6 +8,7 @@ from eclipse_agent.voice import (
     OpenWakeWordTrigger,
     SystemTTS,
     TTSProvider,
+    default_wake_word_model_path,
     normalize_spoken_text,
 )
 
@@ -114,6 +115,13 @@ def test_openwakeword_trigger_dry_run_does_not_load_audio_stack():
     assert result.detected is False
     assert result.executed is False
     assert "Prepared openwakeword" in result.message
+
+
+def test_openwakeword_trigger_defaults_to_custom_eclipse_model():
+    trigger = OpenWakeWordTrigger()
+
+    assert trigger.model_paths == (default_wake_word_model_path(),)
+    assert trigger.model_paths[0].name == "eclipse.onnx"
 
 
 def test_openwakeword_trigger_detects_matching_wake_phrase():

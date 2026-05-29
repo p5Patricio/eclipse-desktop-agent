@@ -1,7 +1,13 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
-from eclipse_agent.planner import ActionKind, PlannedAction, create_action_plan
+from eclipse_agent.planner import (
+    ActionKind,
+    PlannedAction,
+    VisionAnalysisResult,
+    create_action_plan,
+)
 from eclipse_agent.safety import RiskLevel
 from eclipse_agent.tool_router import (
     MCPToolDefinition,
@@ -62,6 +68,27 @@ def _native_type_tool() -> MCPToolDefinition:
         action_kinds=(ActionKind.NATIVE_INPUT,),
         risk_level=RiskLevel.HIGH,
     )
+
+
+def _wayland_screenshot_tool() -> MCPToolDefinition:
+    return MCPToolDefinition(
+        name="screenshot",
+        server_name="wayland",
+        description="Capture a Wayland screenshot with grim.",
+        input_schema={"type": "object"},
+        action_kinds=(ActionKind.SCREENSHOT,),
+        risk_level=RiskLevel.MEDIUM,
+    )
+
+
+class FakeVisionAdapter:
+    def __init__(self, result: VisionAnalysisResult) -> None:
+        self.result = result
+        self.calls: list[tuple[str | Path, str]] = []
+
+    def analyze_image(self, image_path: str | Path, *, prompt: str) -> VisionAnalysisResult:
+        self.calls.append((image_path, prompt))
+        return self.result
 
 
 def test_tool_router_prepares_matching_mcp_tool_without_execution():
@@ -180,6 +207,76 @@ def test_tool_router_reports_missing_mcp_tool_after_safety_passes():
     assert result.tool_name == "missing.tool"
     assert result.success is False
     assert result.requires_confirmation is True
+
+
+def test_tool_router_routes_screenshot_output_to_vision_adapter(tmp_path):
+    image_path = tmp_path / "screen.jpg"
+    image_path.write_bytes(b"\xff\xd8fake-jpeg\xff\xd9")
+    client = FakeMCPClient((_wayland_screenshot_tool(),))
+    vision_adapter = FakeVisionAdapter(
+        VisionAnalysisResult(
+            success=True,
+            model="qwen2-vl:7b",
+            image_path=image_path,
+            message="Vision analysis completed.",
+            text="The screenshot shows a browser window.",
+        )
+    )
+    action = PlannedAction(
+        id="screen-1",
+        kind=ActionKind.SCREENSHOT,
+        description="Capture and analyze the current screen.",
+        risk_level=RiskLevel.MEDIUM,
+        target="current-screen",
+        parameters={"output_path": str(image_path), "vision_prompt": "Describe the screen."},
+        tool_name="wayland.screenshot",
+    )
+
+    result = ToolRouter(mcp_client=client, vision_adapter=vision_adapter).route_action(
+        action,
+        ToolExecutionContext(dry_run=False, confirmed=True),
+    )
+
+    assert result.success is True
+    assert result.executed is True
+    assert "Vision analysis:" in result.message
+    assert result.structured_content["vision_analysis"]["text"] == (
+        "The screenshot shows a browser window."
+    )
+    assert vision_adapter.calls == [(image_path, "Describe the screen.")]
+
+
+def test_tool_router_reports_vision_model_failure_for_screenshot(tmp_path):
+    image_path = tmp_path / "screen.jpg"
+    image_path.write_bytes(b"\xff\xd8fake-jpeg\xff\xd9")
+    client = FakeMCPClient((_wayland_screenshot_tool(),))
+    vision_adapter = FakeVisionAdapter(
+        VisionAnalysisResult(
+            success=False,
+            model="qwen2-vl:7b",
+            image_path=image_path,
+            message="Vision model 'qwen2-vl:7b' is not available in Ollama.",
+        )
+    )
+    action = PlannedAction(
+        id="screen-1",
+        kind=ActionKind.SCREENSHOT,
+        description="Capture and analyze the current screen.",
+        risk_level=RiskLevel.MEDIUM,
+        target="current-screen",
+        parameters={"output_path": str(image_path)},
+        tool_name="wayland.screenshot",
+    )
+
+    result = ToolRouter(mcp_client=client, vision_adapter=vision_adapter).route_action(
+        action,
+        ToolExecutionContext(dry_run=False, confirmed=True),
+    )
+
+    assert result.success is False
+    assert result.executed is True
+    assert "Vision analysis failed" in result.message
+    assert "qwen2-vl:7b" in result.structured_content["vision_error"]["model"]
 
 
 def test_load_mcp_server_configs_reads_stdio_servers(tmp_path):

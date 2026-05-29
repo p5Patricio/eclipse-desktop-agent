@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-MODEL_NAME="${ECLIPSE_LOCAL_LLM_MODEL:-qwen2.5:7b}"
+TEXT_MODEL_NAME="${ECLIPSE_LOCAL_LLM_MODEL:-qwen2.5:7b}"
+VISION_MODEL_NAME="${ECLIPSE_LOCAL_VISION_MODEL:-qwen2-vl:7b}"
 OLLAMA_HOST_VALUE="${OLLAMA_HOST:-127.0.0.1:11434}"
 OLLAMA_INSTALL_URL="https://ollama.com/install.sh"
 
@@ -97,9 +98,11 @@ wait_for_ollama() {
   exit 1
 }
 
-pull_model() {
-  log "Pulling local planning model: ${MODEL_NAME}"
-  ollama pull "${MODEL_NAME}"
+pull_models() {
+  log "Pulling local planning model: ${TEXT_MODEL_NAME}"
+  ollama pull "${TEXT_MODEL_NAME}"
+  log "Pulling local vision model for dynamic screenshot routing: ${VISION_MODEL_NAME}"
+  ollama pull "${VISION_MODEL_NAME}"
 }
 
 main() {
@@ -107,9 +110,10 @@ main() {
   install_ollama
   configure_systemd_service
   wait_for_ollama
-  pull_model
+  pull_models
   log "Local LLM setup complete."
-  log "Eclipse can use http://${OLLAMA_HOST_VALUE}/v1 with model ${MODEL_NAME}."
+  log "Eclipse can use http://${OLLAMA_HOST_VALUE}/v1 with text model ${TEXT_MODEL_NAME}."
+  log "Eclipse can use vision model ${VISION_MODEL_NAME} for screenshot analysis."
 }
 
 main "$@"
