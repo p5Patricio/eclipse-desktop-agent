@@ -10,7 +10,14 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Patricio" }]
-dependencies = []
+dependencies = [
+  "lancedb>=0.22",
+  "mcp>=1.9",
+  "openai>=1.55",
+  "openwakeword>=0.6",
+  "pydantic>=2.8",
+  "sounddevice>=0.4",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -19,6 +26,7 @@ dev = [
 ]
 voice = [
   "faster-whisper>=1.2",
+  "sounddevice>=0.4",
 ]
 
 [project.scripts]

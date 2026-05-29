@@ -5,6 +5,7 @@ from eclipse_agent.voice import (
     ListenOnce,
     LocalWhisperSTT,
     MicrophoneRecorder,
+    OpenWakeWordTrigger,
     SystemTTS,
     TTSProvider,
     normalize_spoken_text,
@@ -91,3 +92,55 @@ def test_listen_once_dry_run_prepares_recording(tmp_path):
     assert result.success is True
     assert result.transcription is None
     assert result.recording.audio_path == tmp_path / "listen.wav"
+
+
+class FakeWakeWordModel:
+    def __init__(self, *scores: float, label: str = "eclipse") -> None:
+        self.scores = list(scores)
+        self.label = label
+
+    def predict(self, frame: object) -> dict[str, float]:
+        del frame
+        score = self.scores.pop(0) if self.scores else 0.0
+        return {self.label: score}
+
+
+def test_openwakeword_trigger_dry_run_does_not_load_audio_stack():
+    trigger = OpenWakeWordTrigger()
+
+    result = trigger.listen(dry_run=True)
+
+    assert result.success is True
+    assert result.detected is False
+    assert result.executed is False
+    assert "Prepared openwakeword" in result.message
+
+
+def test_openwakeword_trigger_detects_matching_wake_phrase():
+    trigger = OpenWakeWordTrigger(
+        model=FakeWakeWordModel(0.1, 0.8, label="Eclipse"),
+        frame_source=(object(), object()),
+        threshold=0.5,
+    )
+
+    result = trigger.listen(dry_run=False)
+
+    assert result.success is True
+    assert result.detected is True
+    assert result.executed is True
+    assert result.label == "Eclipse"
+    assert result.score == 0.8
+
+
+def test_openwakeword_trigger_ignores_unrelated_default_model_label():
+    trigger = OpenWakeWordTrigger(
+        model=FakeWakeWordModel(0.9, label="hey_jarvis"),
+        frame_source=(object(),),
+        threshold=0.5,
+    )
+
+    result = trigger.listen(dry_run=False)
+
+    assert result.success is True
+    assert result.detected is False
+    assert result.score == 0.0

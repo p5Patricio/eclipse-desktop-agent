@@ -6,6 +6,7 @@ import re
 import tempfile
 import time
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,7 +19,14 @@ from eclipse_agent.notification_intents import (
 from eclipse_agent.notifications import NotificationStore
 from eclipse_agent.planner import create_action_plan
 from eclipse_agent.tool_router import ToolExecutionContext, ToolExecutionResult, ToolRouter
-from eclipse_agent.voice import ListenOnce, ListenResult, SpeechResult, SystemTTS
+from eclipse_agent.voice import (
+    ListenOnce,
+    ListenResult,
+    OpenWakeWordTrigger,
+    SpeechResult,
+    SystemTTS,
+    WakeWordDetectionResult,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -56,6 +64,27 @@ class WakeLoopResult:
     turns: tuple[WakeTurnResult, ...]
 
 
+@dataclass(frozen=True, kw_only=True)
+class EfficientWakeTurnResult:
+    """Result of one openwakeword-triggered command turn."""
+
+    success: bool
+    detected: bool
+    wake_word: WakeWordDetectionResult
+    message: str
+    command_text: str = ""
+    command_listen: ListenResult | None = None
+    command_result: WakeCommandResult | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class EfficientWakeLoopResult:
+    """Result of a bounded efficient wake loop."""
+
+    success: bool
+    turns: tuple[EfficientWakeTurnResult, ...]
+
+
 class WakeRuntime:
     """Bounded always-on style wake loop.
 
@@ -69,11 +98,15 @@ class WakeRuntime:
         self,
         *,
         listener: ListenOnce | None = None,
+        listener_factory: Callable[[], ListenOnce] | None = None,
+        wake_trigger: OpenWakeWordTrigger | None = None,
         tts: SystemTTS | None = None,
         router: ToolRouter | None = None,
         store: NotificationStore | None = None,
     ) -> None:
-        self.listener = listener or ListenOnce()
+        self.listener = listener
+        self.listener_factory = listener_factory
+        self.wake_trigger = wake_trigger or OpenWakeWordTrigger()
         self.tts = tts or SystemTTS()
         self.router = router or ToolRouter()
         self.store = store or NotificationStore()
@@ -125,6 +158,119 @@ class WakeRuntime:
                 time.sleep(sleep_seconds)
         return WakeLoopResult(success=all(turn.success for turn in turns), turns=tuple(turns))
 
+    def run_efficient(
+        self,
+        *,
+        iterations: int = 1,
+        command_seconds: int = 5,
+        audio_dir: str | Path | None = None,
+        dry_run: bool = True,
+        speak: bool = False,
+        route_execute: bool = False,
+        confirmed: bool = False,
+        mark_announced: bool = False,
+        wake_timeout_seconds: float | None = None,
+        sleep_seconds: float = 0.0,
+    ) -> EfficientWakeLoopResult:
+        """Run an openwakeword loop that starts Whisper only after detection."""
+
+        if iterations < 0:
+            raise ValueError("iterations must be zero or positive.")
+        turns: list[EfficientWakeTurnResult] = []
+        index = 0
+        while iterations == 0 or index < iterations:
+            index += 1
+            turns.append(
+                self.run_efficient_turn(
+                    command_seconds=command_seconds,
+                    audio_dir=audio_dir,
+                    turn_index=index,
+                    dry_run=dry_run,
+                    speak=speak,
+                    route_execute=route_execute,
+                    confirmed=confirmed,
+                    mark_announced=mark_announced,
+                    wake_timeout_seconds=wake_timeout_seconds,
+                )
+            )
+            if iterations == 0 and sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+            elif index < iterations and sleep_seconds > 0:
+                time.sleep(sleep_seconds)
+        return EfficientWakeLoopResult(
+            success=all(turn.success for turn in turns),
+            turns=tuple(turns),
+        )
+
+    def run_efficient_turn(
+        self,
+        *,
+        command_seconds: int = 5,
+        audio_dir: str | Path | None = None,
+        turn_index: int = 1,
+        dry_run: bool = True,
+        speak: bool = False,
+        route_execute: bool = False,
+        confirmed: bool = False,
+        mark_announced: bool = False,
+        wake_timeout_seconds: float | None = None,
+    ) -> EfficientWakeTurnResult:
+        """Wait on openwakeword, then record/transcribe one command chunk."""
+
+        wake_word = self.wake_trigger.listen(
+            timeout_seconds=wake_timeout_seconds,
+            dry_run=dry_run,
+        )
+        if dry_run or not wake_word.detected:
+            return EfficientWakeTurnResult(
+                success=wake_word.success,
+                detected=wake_word.detected,
+                wake_word=wake_word,
+                message=wake_word.message,
+            )
+        if not wake_word.success:
+            return EfficientWakeTurnResult(
+                success=False,
+                detected=False,
+                wake_word=wake_word,
+                message=wake_word.message,
+            )
+
+        base_dir = Path(audio_dir).expanduser() if audio_dir else Path(tempfile.gettempdir())
+        command_audio = base_dir / f"eclipse-efficient-command-{turn_index}.wav"
+        listener = self._get_listener()
+        command_listen = listener.run(
+            seconds=command_seconds,
+            audio_path=command_audio,
+            dry_run=False,
+        )
+        if not command_listen.success:
+            return EfficientWakeTurnResult(
+                success=False,
+                detected=True,
+                wake_word=wake_word,
+                command_listen=command_listen,
+                message=command_listen.message,
+            )
+
+        command_text = _listen_text(command_listen)
+        command_result = self.handle_command(
+            command_text,
+            speak=speak,
+            route_execute=route_execute,
+            confirmed=confirmed,
+            mark_announced=mark_announced,
+        )
+        return EfficientWakeTurnResult(
+            success=command_result.success,
+            detected=True,
+            wake_word=wake_word,
+            command_text=command_text,
+            command_listen=command_listen,
+            command_result=command_result,
+            message=command_result.message,
+        )
+
     def run_turn(
         self,
         *,
@@ -143,7 +289,7 @@ class WakeRuntime:
 
         base_dir = Path(audio_dir).expanduser() if audio_dir else Path(tempfile.gettempdir())
         wake_audio = base_dir / f"eclipse-wake-{turn_index}.wav"
-        wake_listen = self.listener.run(
+        wake_listen = self._get_listener().run(
             seconds=wake_seconds,
             audio_path=wake_audio,
             dry_run=dry_run,
@@ -181,7 +327,7 @@ class WakeRuntime:
         command_listen: ListenResult | None = None
         if not command_text:
             command_audio = base_dir / f"eclipse-command-{turn_index}.wav"
-            command_listen = self.listener.run(
+            command_listen = self._get_listener().run(
                 seconds=command_seconds,
                 audio_path=command_audio,
                 dry_run=False,
@@ -232,7 +378,7 @@ class WakeRuntime:
                 success=False,
                 kind="empty",
                 command_text=command_text,
-                message="No escuché un comando después de la frase de activación.",
+                message="No command was heard after the wake phrase.",
             )
 
         notification_intent = parse_notification_voice_intent(normalized_command)
@@ -265,16 +411,16 @@ class WakeRuntime:
         if success:
             executed_count = sum(1 for result in route_results if result.executed)
             message = (
-                f"Preparé {len(route_results)} acción(es)."
+                f"Prepared {len(route_results)} action(s)."
                 if executed_count == 0
-                else f"Ejecuté {executed_count} de {len(route_results)} acción(es)."
+                else f"Executed {executed_count} of {len(route_results)} action(s)."
             )
         else:
             blocked = tuple(result for result in route_results if result.requires_confirmation)
             message = (
-                "Necesito confirmación o todavía no tengo una herramienta segura para eso."
+                "Confirmation is required or no safe tool is available for that command."
                 if blocked
-                else "No pude preparar una acción segura para ese comando."
+                else "No safe action could be prepared for that command."
             )
         return self._with_optional_speech(
             WakeCommandResult(
@@ -305,6 +451,11 @@ class WakeRuntime:
             route_results=result.route_results,
             speech_result=speech,
         )
+
+    def _get_listener(self) -> ListenOnce:
+        if self.listener is None:
+            self.listener = self.listener_factory() if self.listener_factory else ListenOnce()
+        return self.listener
 
 
 def contains_wake_phrase(text: str, wake_phrase: str = "Eclipse") -> bool:
@@ -378,6 +529,36 @@ def render_wake_loop_result(result: WakeLoopResult) -> str:
     for index, turn in enumerate(result.turns, start=1):
         lines.append(f"\nTurn {index}:")
         lines.append(render_wake_turn_result(turn))
+    return "\n".join(lines)
+
+
+def render_efficient_wake_turn_result(result: EfficientWakeTurnResult) -> str:
+    """Render one efficient wake-loop turn for CLI."""
+
+    status = "ok" if result.success else "failed"
+    detected = "detected" if result.detected else "idle"
+    lines = [f"Efficient wake turn [{status}/{detected}]: {result.message}"]
+    lines.append(f"wake_provider: {result.wake_word.provider}")
+    if result.wake_word.label or result.wake_word.score:
+        lines.append(f"wake_label: {result.wake_word.label or '<unknown>'}")
+        lines.append(f"wake_score: {result.wake_word.score:.3f}")
+    if result.command_listen:
+        lines.append(f"command_audio: {result.command_listen.recording.audio_path}")
+    if result.command_text:
+        lines.append(f"command_text: {result.command_text}")
+    if result.command_result:
+        lines.append(render_wake_command_result(result.command_result))
+    return "\n".join(lines)
+
+
+def render_efficient_wake_loop_result(result: EfficientWakeLoopResult) -> str:
+    """Render a bounded efficient wake loop result."""
+
+    status = "ok" if result.success else "failed"
+    lines = [f"Eclipse efficient wake loop [{status}] turns={len(result.turns)}"]
+    for index, turn in enumerate(result.turns, start=1):
+        lines.append(f"\nTurn {index}:")
+        lines.append(render_efficient_wake_turn_result(turn))
     return "\n".join(lines)
 
 

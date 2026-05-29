@@ -1,13 +1,23 @@
-"""Deterministic planning primitives for Eclipse multi-action requests."""
+"""Hybrid planning primitives for Eclipse multi-action requests."""
 
 from __future__ import annotations
 
+import json
+import os
 import re
-from dataclasses import dataclass, field
+from collections.abc import Sequence
 from enum import StrEnum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eclipse_agent.coding_agents import CODING_AGENTS, get_coding_agent
 from eclipse_agent.safety import RiskLevel
+from eclipse_agent.telemetry import ExecutionTelemetryStore, TelemetryLayer
+
+DEFAULT_LOCAL_LLM_BASE_URL = "http://localhost:11434/v1"
+DEFAULT_LOCAL_LLM_MODEL = "qwen2.5:7b"
+DEFAULT_LOCAL_LLM_API_KEY = "ollama"
 
 
 class ActionKind(StrEnum):
@@ -17,6 +27,8 @@ class ActionKind(StrEnum):
     OPEN_WEB_APP = "open_web_app"
     BROWSER_SEARCH = "browser_search"
     OPEN_CODING_AGENT = "open_coding_agent"
+    MCP_TOOL = "mcp_tool"
+    NATIVE_INPUT = "native_input"
     UNKNOWN = "unknown"
 
 
@@ -28,17 +40,44 @@ KNOWN_WEB_APPS: dict[str, str] = {
 }
 
 
-@dataclass(frozen=True)
-class PlannedAction:
+class AvailableTool(BaseModel):
+    """A tool descriptor exposed to the planner before it chooses actions."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    description: str = ""
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    action_kinds: tuple[ActionKind, ...] = ()
+    risk_level: RiskLevel = RiskLevel.MEDIUM
+    server_name: str | None = None
+
+
+class PlannedAction(BaseModel):
     """A single tool-level action in a user request."""
 
-    id: str
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_.:-]+$")
     kind: ActionKind
-    description: str
+    description: str = Field(min_length=1)
     risk_level: RiskLevel
-    target: str
-    parameters: dict[str, str] = field(default_factory=dict)
+    target: str = Field(min_length=1)
+    parameters: dict[str, Any] = Field(default_factory=dict)
     depends_on: tuple[str, ...] = ()
+    tool_name: str | None = Field(
+        default=None,
+        description="MCP tool name or qualified server.tool name selected by the planner.",
+    )
+
+    @field_validator("parameters", mode="before")
+    @classmethod
+    def _coerce_parameters(cls, value: object) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return dict(value)
+        raise TypeError("parameters must be an object")
 
     @property
     def can_start_immediately(self) -> bool:
@@ -47,19 +86,27 @@ class PlannedAction:
         return not self.depends_on
 
 
-@dataclass(frozen=True)
-class ActionPlan:
+class ActionPlan(BaseModel):
     """A decomposed instruction that may contain multiple actions."""
 
-    user_instruction: str
-    actions: tuple[PlannedAction, ...]
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    user_instruction: str = Field(min_length=1)
+    actions: tuple[PlannedAction, ...] = Field(default_factory=tuple)
+    planner_version: str = "hybrid-v1"
 
     @property
     def requires_confirmation(self) -> bool:
-        """Return whether the plan contains high/critical-risk actions."""
+        """Return whether the plan contains high or critical risk actions."""
 
         high_risk_levels = {RiskLevel.HIGH, RiskLevel.CRITICAL}
         return any(action.risk_level in high_risk_levels for action in self.actions)
+
+    @property
+    def has_unknown_actions(self) -> bool:
+        """Return whether this plan needs smart-layer fallback."""
+
+        return any(action.kind is ActionKind.UNKNOWN for action in self.actions)
 
     @property
     def parallel_groups(self) -> tuple[tuple[PlannedAction, ...], ...]:
@@ -78,20 +125,223 @@ class ActionPlan:
     def render(self) -> str:
         """Render the plan for CLI output."""
 
-        lines = ["Eclipse action plan:"]
+        lines = [f"Eclipse action plan ({self.planner_version}):"]
         for group_index, group in enumerate(self.parallel_groups, start=1):
             lines.append(f"Group {group_index}:")
             for action in group:
+                tool = f" via {action.tool_name}" if action.tool_name else ""
                 lines.append(
-                    f"  - {action.id}: {action.kind.value} -> {action.target} "
+                    f"  - {action.id}: {action.kind.value} -> {action.target}{tool} "
                     f"[{action.risk_level.value}] {action.description}"
                 )
         lines.append(f"Requires confirmation: {self.requires_confirmation}")
         return "\n".join(lines)
 
 
-def create_action_plan(instruction: str) -> ActionPlan:
-    """Create a conservative deterministic plan from a natural-language instruction."""
+class LLMPlannerConfig(BaseModel):
+    """Configuration for Eclipse's local OpenAI-compatible planning endpoint."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    base_url: str = DEFAULT_LOCAL_LLM_BASE_URL
+    model: str = DEFAULT_LOCAL_LLM_MODEL
+    api_key: str = DEFAULT_LOCAL_LLM_API_KEY
+    timeout_seconds: float = Field(default=30.0, gt=0)
+    max_tokens: int = Field(default=1500, gt=0)
+
+
+OpenAICompatiblePlannerConfig = LLMPlannerConfig
+
+
+class LLMPlanner:
+    """Smart-layer planner backed by a local OpenAI-compatible LLM endpoint."""
+
+    def __init__(
+        self,
+        config: LLMPlannerConfig | None = None,
+        *,
+        client: object | None = None,
+    ) -> None:
+        self.config = config or LLMPlannerConfig()
+        self._client = client
+
+    @property
+    def client(self) -> object:
+        """Return the injected client or lazily construct the official OpenAI client."""
+
+        if self._client is None:
+            try:
+                from openai import OpenAI
+            except ModuleNotFoundError as exc:
+                raise RuntimeError(
+                    "The official 'openai' Python package is required for smart-layer planning."
+                ) from exc
+            self._client = OpenAI(
+                api_key=self.config.api_key,
+                base_url=self.config.base_url,
+                timeout=self.config.timeout_seconds,
+            )
+        return self._client
+
+    def create_action_plan(
+        self,
+        instruction: str,
+        *,
+        available_tools: Sequence[AvailableTool] = (),
+        semantic_context: Sequence[str] = (),
+    ) -> ActionPlan:
+        """Create a validated plan using SDK-native Pydantic Structured Outputs."""
+
+        completion = self.client.chat.completions.parse(  # type: ignore[attr-defined]
+            model=self.config.model,
+            messages=build_llm_planner_messages(
+                instruction=instruction,
+                available_tools=available_tools,
+                semantic_context=semantic_context,
+            ),
+            response_format=ActionPlan,
+            temperature=0,
+            max_tokens=self.config.max_tokens,
+        )
+        message = completion.choices[0].message
+        refusal = getattr(message, "refusal", None)
+        if refusal:
+            raise ValueError(f"Local LLM refused to create an action plan: {refusal}")
+        parsed = getattr(message, "parsed", None)
+        if isinstance(parsed, ActionPlan):
+            return parsed
+        if isinstance(parsed, dict):
+            return ActionPlan.model_validate(parsed)
+        content = getattr(message, "content", None)
+        if isinstance(content, str) and content.strip():
+            return ActionPlan.model_validate_json(_strip_json_fences(content))
+        raise ValueError("Local LLM did not return a structured ActionPlan.")
+
+
+class HybridPlanner:
+    """Two-tier planner that uses deterministic rules before local LLM fallback."""
+
+    def __init__(
+        self,
+        *,
+        llm_planner: LLMPlanner | None = None,
+        telemetry_store: ExecutionTelemetryStore | None = None,
+        smart_layer_enabled: bool = True,
+    ) -> None:
+        self.llm_planner = llm_planner or LLMPlanner()
+        self.telemetry_store = telemetry_store
+        self.smart_layer_enabled = smart_layer_enabled
+
+    def create_action_plan(
+        self,
+        instruction: str,
+        *,
+        available_tools: Sequence[AvailableTool] = (),
+        semantic_context: Sequence[str] = (),
+    ) -> ActionPlan:
+        """Create a plan with fast deterministic rules and smart local LLM fallback."""
+
+        fast_plan = create_local_fallback_action_plan(instruction)
+        if not fast_plan.has_unknown_actions:
+            self._record(instruction, TelemetryLayer.FAST_LAYER, True)
+            return fast_plan
+
+        if not self.smart_layer_enabled:
+            self._record(instruction, TelemetryLayer.FAST_LAYER, False)
+            return fast_plan
+
+        try:
+            smart_plan = self.llm_planner.create_action_plan(
+                instruction,
+                available_tools=available_tools,
+                semantic_context=semantic_context,
+            )
+        except Exception:
+            self._record(instruction, TelemetryLayer.SMART_LAYER, False)
+            return fast_plan
+
+        success = not smart_plan.has_unknown_actions
+        self._record(instruction, TelemetryLayer.SMART_LAYER, success)
+        return smart_plan
+
+    def _record(
+        self,
+        instruction: str,
+        layer_used: TelemetryLayer,
+        success_status: bool,
+    ) -> None:
+        if self.telemetry_store is None:
+            return
+        self.telemetry_store.log_execution(
+            instruction=instruction,
+            layer_used=layer_used,
+            success_status=success_status,
+        )
+
+
+def create_action_plan(
+    instruction: str,
+    *,
+    llm_config: LLMPlannerConfig | None = None,
+    available_tools: Sequence[AvailableTool] = (),
+    semantic_context: Sequence[str] = (),
+    llm_client: object | None = None,
+    telemetry_store: ExecutionTelemetryStore | None = None,
+    smart_layer_enabled: bool = True,
+) -> ActionPlan:
+    """Create an action plan through the hybrid deterministic/local-LLM planner."""
+
+    return HybridPlanner(
+        llm_planner=LLMPlanner(llm_config or LLMPlannerConfig(), client=llm_client),
+        telemetry_store=telemetry_store,
+        smart_layer_enabled=smart_layer_enabled,
+    ).create_action_plan(
+        instruction,
+        available_tools=available_tools,
+        semantic_context=semantic_context,
+    )
+
+
+def build_planner_config_from_env(
+    *,
+    endpoint_url: str | None,
+    model: str | None,
+    api_key: str | None = None,
+    api_key_env: str | None = None,
+) -> LLMPlannerConfig:
+    """Build local LLM planner config from CLI values and environment defaults."""
+
+    resolved_key = api_key
+    if not resolved_key and api_key_env:
+        resolved_key = os.environ.get(api_key_env)
+    return LLMPlannerConfig(
+        base_url=endpoint_url or os.environ.get("ECLIPSE_LLM_BASE_URL", DEFAULT_LOCAL_LLM_BASE_URL),
+        model=model or os.environ.get("ECLIPSE_LLM_MODEL", DEFAULT_LOCAL_LLM_MODEL),
+        api_key=resolved_key or os.environ.get("ECLIPSE_LLM_API_KEY", DEFAULT_LOCAL_LLM_API_KEY),
+    )
+
+
+def build_llm_planner_messages(
+    *,
+    instruction: str,
+    available_tools: Sequence[AvailableTool],
+    semantic_context: Sequence[str],
+) -> list[dict[str, str]]:
+    """Build local LLM messages for structured planning."""
+
+    user_payload = {
+        "instruction": instruction,
+        "available_tools": [tool.model_dump(mode="json") for tool in available_tools],
+        "semantic_context": list(semantic_context),
+    }
+    return [
+        {"role": "system", "content": STRUCTURED_PLANNER_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+    ]
+
+
+def create_local_fallback_action_plan(instruction: str) -> ActionPlan:
+    """Create a conservative offline plan using deterministic rules."""
 
     clauses = _split_instruction(instruction)
     actions: list[PlannedAction] = []
@@ -110,7 +360,11 @@ def create_action_plan(instruction: str) -> ActionPlan:
             )
         )
 
-    return ActionPlan(user_instruction=instruction, actions=tuple(actions))
+    return ActionPlan(
+        user_instruction=instruction.strip() or "empty instruction",
+        actions=tuple(actions),
+        planner_version="fast-layer-v1",
+    )
 
 
 def _split_instruction(instruction: str) -> tuple[str, ...]:
@@ -118,7 +372,8 @@ def _split_instruction(instruction: str) -> tuple[str, ...]:
     if not normalized:
         return ()
     parts = re.split(
-        r"\s*(?:,?\s+y\s+también|,?\s+también|,?\s+además|,?\s+luego|,?\s+después(?: de eso)?)\s+",
+        r"\s*(?:,?\s+y\s+también|,?\s+también|,?\s+además|,?\s+luego|"
+        r",?\s+después(?: de eso)?)\s+",
         normalized,
         flags=re.IGNORECASE,
     )
@@ -174,7 +429,8 @@ def _maybe_media_action(clause: str, lowered: str, index: int) -> PlannedAction 
         description="Open YouTube Music and play the requested media.",
         risk_level=RiskLevel.LOW,
         target="YouTube Music",
-        parameters={"query": query},
+        parameters={"query": query, "app_name": "YouTube Music"},
+        tool_name="desktop.open_app",
     )
 
 
@@ -200,6 +456,7 @@ def _maybe_web_open_actions(
                     risk_level=RiskLevel.LOW,
                     target=name.title(),
                     parameters={"url": url},
+                    tool_name="browser.open_url",
                 )
             )
     return tuple(actions)
@@ -221,6 +478,7 @@ def _maybe_browser_search_action(clause: str, lowered: str, index: int) -> Plann
         risk_level=RiskLevel.MEDIUM,
         target="browser",
         parameters={"query": query},
+        tool_name="browser.search",
     )
 
 
@@ -238,5 +496,29 @@ def _maybe_coding_agent_action(clause: str, lowered: str, index: int) -> Planned
                 risk_level=RiskLevel.HIGH,
                 target=resolved.display_name,
                 parameters={"command": " ".join(resolved.command), "request": clause},
+                tool_name="coding.open_agent",
             )
     return None
+
+
+def _strip_json_fences(content: str) -> str:
+    stripped = content.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\s*```$", "", stripped)
+    return stripped.strip()
+
+
+STRUCTURED_PLANNER_SYSTEM_PROMPT = """You are Eclipse's local deterministic desktop-agent planner.
+Return only an object matching the supplied ActionPlan schema.
+Use the available_tools list whenever possible. Prefer selecting a concrete
+MCP tool name in PlannedAction.tool_name. Never invent secret values.
+Preserve Safety-first and Draft-first behavior: classify risk conservatively.
+Use medium, high, or critical risk when an action can affect external state,
+requires credentials, sends messages, controls native input, modifies files,
+or launches autonomous coding agents. Use critical for destructive or secret-
+exfiltration requests. Unknown or unsupported instructions must become one
+medium-risk clarification action instead of unsafe execution.
+All descriptions and targets must be written in English.
+"""

@@ -5,10 +5,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Iterable, Protocol
 
 
 class TTSProvider(StrEnum):
@@ -73,11 +74,41 @@ class ListenResult:
     message: str
 
 
+@dataclass(frozen=True)
+class WakeWordStatus:
+    """Availability status for efficient wake-word detection."""
+
+    available: bool
+    provider: str
+    message: str
+
+
+@dataclass(frozen=True)
+class WakeWordDetectionResult:
+    """Result of an openwakeword detection pass."""
+
+    success: bool
+    detected: bool
+    provider: str
+    message: str
+    dry_run: bool
+    executed: bool = False
+    label: str = ""
+    score: float = 0.0
+
+
 class CommandRunner(Protocol):
     """Protocol for subprocess-compatible command runners."""
 
     def __call__(self, command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         """Run a command and return its completed process."""
+
+
+class WakeWordModel(Protocol):
+    """Protocol for openwakeword-compatible model objects."""
+
+    def predict(self, frame: object) -> dict[str, float]:
+        """Return wake-word confidence scores for one audio frame."""
 
 
 class SystemTTS:
@@ -297,6 +328,176 @@ class ListenOnce:
         )
 
 
+class OpenWakeWordTrigger:
+    """Efficient wake-word trigger backed by openwakeword.
+
+    This class only runs lightweight wake-word inference on short PCM frames.
+    Full Whisper transcription is deliberately left to `ListenOnce` after a
+    positive wake-word detection.
+    """
+
+    provider = "openwakeword"
+
+    def __init__(
+        self,
+        *,
+        wake_phrase: str = "Eclipse",
+        model_paths: tuple[str | Path, ...] = (),
+        threshold: float = 0.5,
+        sample_rate: int = 16000,
+        frame_duration_ms: int = 80,
+        model: WakeWordModel | None = None,
+        frame_source: Iterable[object] | None = None,
+    ) -> None:
+        self.wake_phrase = wake_phrase
+        self.model_paths = tuple(Path(path).expanduser() for path in model_paths)
+        self.threshold = threshold
+        self.sample_rate = sample_rate
+        self.frame_duration_ms = frame_duration_ms
+        self.model = model
+        self.frame_source = frame_source
+
+    @property
+    def frame_size(self) -> int:
+        """Return the number of samples per wake-word frame."""
+
+        return int(self.sample_rate * self.frame_duration_ms / 1000)
+
+    def status(self) -> WakeWordStatus:
+        """Return whether openwakeword and an audio streaming backend are importable."""
+
+        try:
+            import openwakeword  # noqa: F401
+            import sounddevice  # noqa: F401
+        except ModuleNotFoundError as exc:
+            return WakeWordStatus(False, self.provider, f"Missing Python module: {exc.name}.")
+        return WakeWordStatus(True, self.provider, "openwakeword and sounddevice are available.")
+
+    def listen(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+        dry_run: bool = True,
+    ) -> WakeWordDetectionResult:
+        """Wait for the wake word without running Whisper transcription."""
+
+        if dry_run:
+            return WakeWordDetectionResult(
+                success=True,
+                detected=False,
+                provider=self.provider,
+                message="Prepared openwakeword listener; use --execute to monitor the microphone.",
+                dry_run=True,
+            )
+
+        try:
+            model = self.model or self._load_model()
+            frames = self.frame_source or self._microphone_frames(timeout_seconds=timeout_seconds)
+            return self._detect_from_frames(model, frames, timeout_seconds=timeout_seconds)
+        except (RuntimeError, ValueError) as exc:
+            return WakeWordDetectionResult(
+                success=False,
+                detected=False,
+                provider=self.provider,
+                message=str(exc),
+                dry_run=False,
+                executed=False,
+            )
+
+    def _detect_from_frames(
+        self,
+        model: WakeWordModel,
+        frames: Iterable[object],
+        *,
+        timeout_seconds: float | None,
+    ) -> WakeWordDetectionResult:
+        deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
+        best_label = ""
+        best_score = 0.0
+        for frame in frames:
+            prediction = model.predict(frame)
+            label, score = self._best_relevant_prediction(prediction)
+            if score > best_score:
+                best_label = label
+                best_score = score
+            if score >= self.threshold:
+                return WakeWordDetectionResult(
+                    success=True,
+                    detected=True,
+                    provider=self.provider,
+                    message=f"Wake word detected for {self.wake_phrase}.",
+                    dry_run=False,
+                    executed=True,
+                    label=label or self.wake_phrase,
+                    score=score,
+                )
+            if deadline and time.monotonic() >= deadline:
+                break
+        return WakeWordDetectionResult(
+            success=True,
+            detected=False,
+            provider=self.provider,
+            message="Wake word was not detected before timeout.",
+            dry_run=False,
+            executed=True,
+            label=best_label,
+            score=best_score,
+        )
+
+    def _load_model(self) -> WakeWordModel:
+        try:
+            from openwakeword import utils as openwakeword_utils
+            from openwakeword.model import Model
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(f"Missing Python module: {exc.name}.") from exc
+
+        if self.model_paths:
+            missing = tuple(path for path in self.model_paths if not path.exists())
+            if missing:
+                labels = ", ".join(str(path) for path in missing)
+                raise ValueError(f"Wake-word model file does not exist: {labels}")
+            return Model(wakeword_models=[str(path) for path in self.model_paths])
+
+        openwakeword_utils.download_models()
+        return Model()
+
+    def _best_relevant_prediction(self, prediction: dict[str, float]) -> tuple[str, float]:
+        """Return the highest wake-phrase score from one model prediction."""
+
+        if self.model_paths:
+            return _best_prediction(prediction)
+
+        normalized_phrase = _normalize_prediction_label(self.wake_phrase)
+        relevant = {
+            label: score
+            for label, score in prediction.items()
+            if normalized_phrase and normalized_phrase in _normalize_prediction_label(label)
+        }
+        return _best_prediction(relevant)
+
+    def _microphone_frames(self, *, timeout_seconds: float | None) -> Iterable[object]:
+        try:
+            import numpy as np
+            import sounddevice as sd
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(f"Missing Python module: {exc.name}.") from exc
+
+        deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
+        with sd.RawInputStream(
+            samplerate=self.sample_rate,
+            channels=1,
+            dtype="int16",
+            blocksize=self.frame_size,
+        ) as stream:
+            while True:
+                data, overflowed = stream.read(self.frame_size)
+                if overflowed:
+                    continue
+                yield np.frombuffer(data, dtype=np.int16)
+                if deadline and time.monotonic() >= deadline:
+                    return
+
+
 def normalize_spoken_text(text: str) -> str:
     """Normalize and validate text before passing it to local TTS."""
 
@@ -338,6 +539,21 @@ def render_listen_result(result: ListenResult) -> str:
     return "\n".join(lines)
 
 
+def render_wake_word_result(result: WakeWordDetectionResult) -> str:
+    """Render wake-word detection output for CLI display."""
+
+    status = "detected" if result.detected else "idle"
+    if not result.success:
+        status = "failed"
+    elif result.dry_run:
+        status = "prepared"
+    lines = [f"Wake word [{status}] {result.provider}: {result.message}"]
+    if result.label or result.score:
+        lines.append(f"label: {result.label or '<unknown>'}")
+        lines.append(f"score: {result.score:.3f}")
+    return "\n".join(lines)
+
+
 def _default_audio_path() -> Path:
     return Path(tempfile.gettempdir()) / "eclipse-listen.wav"
 
@@ -352,3 +568,14 @@ def shlex_join(command: tuple[str, ...]) -> str:
     import shlex
 
     return shlex.join(command)
+
+
+def _best_prediction(prediction: dict[str, float]) -> tuple[str, float]:
+    if not prediction:
+        return "", 0.0
+    label, score = max(prediction.items(), key=lambda item: float(item[1]))
+    return str(label), float(score)
+
+
+def _normalize_prediction_label(label: str) -> str:
+    return " ".join(label.casefold().replace("_", " ").replace("-", " ").split())

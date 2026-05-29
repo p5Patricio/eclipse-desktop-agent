@@ -1,5 +1,55 @@
-from eclipse_agent.planner import ActionKind, create_action_plan
+from dataclasses import dataclass
+
+from eclipse_agent.planner import (
+    ActionKind,
+    ActionPlan,
+    AvailableTool,
+    HybridPlanner,
+    LLMPlanner,
+    LLMPlannerConfig,
+    PlannedAction,
+    build_planner_config_from_env,
+    create_action_plan,
+)
 from eclipse_agent.safety import RiskLevel
+from eclipse_agent.telemetry import ExecutionTelemetryStore, TelemetryLayer
+
+
+@dataclass
+class FakeMessage:
+    parsed: ActionPlan
+    refusal: str | None = None
+    content: str | None = None
+
+
+@dataclass
+class FakeChoice:
+    message: FakeMessage
+
+
+@dataclass
+class FakeCompletion:
+    choices: list[FakeChoice]
+
+
+class FakeCompletions:
+    def __init__(self, plan: ActionPlan) -> None:
+        self.plan = plan
+        self.calls = []
+
+    def parse(self, **kwargs):
+        self.calls.append(kwargs)
+        return FakeCompletion(choices=[FakeChoice(message=FakeMessage(parsed=self.plan))])
+
+
+class FakeChat:
+    def __init__(self, plan: ActionPlan) -> None:
+        self.completions = FakeCompletions(plan)
+
+
+class FakeOpenAIClient:
+    def __init__(self, plan: ActionPlan) -> None:
+        self.chat = FakeChat(plan)
 
 
 def test_plans_media_and_multiple_browser_apps_from_single_instruction():
@@ -18,6 +68,7 @@ def test_plans_media_and_multiple_browser_apps_from_single_instruction():
     assert {action.target for action in plan.actions[1:]} == {"Youtube", "Instagram", "Messenger"}
     assert plan.requires_confirmation is False
     assert len(plan.parallel_groups) == 1
+    assert plan.planner_version == "fast-layer-v1"
 
 
 def test_search_action_is_medium_risk_browser_work():
@@ -34,3 +85,84 @@ def test_coding_agent_action_requires_confirmation():
     assert plan.actions[0].kind is ActionKind.OPEN_CODING_AGENT
     assert plan.actions[0].risk_level is RiskLevel.HIGH
     assert plan.requires_confirmation is True
+
+
+def test_hybrid_planner_uses_fast_layer_without_llm_for_known_instruction(tmp_path):
+    smart_plan = _smart_browser_plan("Open Instagram")
+    client = FakeOpenAIClient(smart_plan)
+    telemetry = ExecutionTelemetryStore(tmp_path / "telemetry.sqlite3")
+    planner = HybridPlanner(
+        llm_planner=LLMPlanner(client=client),
+        telemetry_store=telemetry,
+    )
+
+    plan = planner.create_action_plan("Abre Instagram en el navegador")
+
+    assert plan.planner_version == "fast-layer-v1"
+    assert client.chat.completions.calls == []
+    summary = telemetry.summarize(days=1)
+    assert summary.fast_layer_requests == 1
+    assert summary.smart_layer_requests == 0
+
+
+def test_hybrid_planner_falls_back_to_local_llm_for_unknown_instruction(tmp_path):
+    smart_plan = _smart_browser_plan("Open calendar")
+    client = FakeOpenAIClient(smart_plan)
+    telemetry = ExecutionTelemetryStore(tmp_path / "telemetry.sqlite3")
+    tool = AvailableTool(
+        name="browser.open_url",
+        description="Open a browser URL.",
+        action_kinds=(ActionKind.OPEN_WEB_APP,),
+        risk_level=RiskLevel.LOW,
+    )
+    planner = HybridPlanner(
+        llm_planner=LLMPlanner(LLMPlannerConfig(), client=client),
+        telemetry_store=telemetry,
+    )
+
+    plan = planner.create_action_plan("Open my calendar", available_tools=(tool,))
+
+    assert plan.actions[0].tool_name == "browser.open_url"
+    assert plan.actions[0].kind is ActionKind.OPEN_WEB_APP
+    call = client.chat.completions.calls[0]
+    assert call["model"] == "qwen2.5:7b"
+    assert call["response_format"] is ActionPlan
+    assert "available_tools" in call["messages"][1]["content"]
+    summary = telemetry.summarize(days=1)
+    assert summary.fast_layer_requests == 0
+    assert summary.smart_layer_requests == 1
+
+
+def test_build_planner_config_defaults_to_ollama_qwen(monkeypatch):
+    monkeypatch.delenv("ECLIPSE_LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("ECLIPSE_LLM_MODEL", raising=False)
+    monkeypatch.delenv("ECLIPSE_LLM_API_KEY", raising=False)
+
+    config = build_planner_config_from_env(
+        endpoint_url=None,
+        model=None,
+        api_key=None,
+        api_key_env="ECLIPSE_LLM_API_KEY",
+    )
+
+    assert config.base_url == "http://localhost:11434/v1"
+    assert config.model == "qwen2.5:7b"
+    assert config.api_key == "ollama"
+
+
+def _smart_browser_plan(instruction: str) -> ActionPlan:
+    return ActionPlan(
+        user_instruction=instruction,
+        planner_version="smart-layer-v1",
+        actions=(
+            PlannedAction(
+                id="action-1",
+                kind=ActionKind.OPEN_WEB_APP,
+                description="Open the requested web app in the browser.",
+                risk_level=RiskLevel.LOW,
+                target="Browser",
+                parameters={"url": "https://calendar.google.com/"},
+                tool_name="browser.open_url",
+            ),
+        ),
+    )

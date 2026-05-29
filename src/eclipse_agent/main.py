@@ -22,7 +22,13 @@ from eclipse_agent.browser_automation import (
 )
 from eclipse_agent.coding_agents import build_coding_agent_prompt, get_coding_agent
 from eclipse_agent.config import EclipseConfig
-from eclipse_agent.fedora_control import FedoraNativeController, render_fedora_control_result
+from eclipse_agent.fedora_control import (
+    DEFAULT_YDOTOOL_SOCKET,
+    FedoraNativeController,
+    WaylandNativeInput,
+    WaylandScreenCapture,
+    render_fedora_control_result,
+)
 from eclipse_agent.notification_daemon import (
     DBusNotificationDaemon,
     render_dbus_notification_daemon_result,
@@ -57,14 +63,20 @@ from eclipse_agent.notifications import (
     render_notification_events,
     render_notification_processing_result,
 )
-from eclipse_agent.planner import create_action_plan
+from eclipse_agent.planner import (
+    LLMPlannerConfig,
+    build_planner_config_from_env,
+    create_action_plan,
+)
 from eclipse_agent.resources import estimate_resource_profile
 from eclipse_agent.runtime_diagnostics import collect_runtime_diagnostics
+from eclipse_agent.telemetry import ExecutionTelemetryStore, render_telemetry_summary
 from eclipse_agent.tool_router import ToolExecutionContext, ToolRouter, render_tool_results
-from eclipse_agent.voice import ListenOnce, LocalWhisperSTT, SystemTTS
+from eclipse_agent.voice import ListenOnce, LocalWhisperSTT, OpenWakeWordTrigger, SystemTTS
 from eclipse_agent.voice import render_listen_result, render_speech_result
 from eclipse_agent.wake_runtime import (
     WakeRuntime,
+    render_efficient_wake_loop_result,
     render_wake_command_result,
     render_wake_loop_result,
 )
@@ -218,6 +230,69 @@ def build_parser() -> argparse.ArgumentParser:
         help="When summarizing notifications, mark pending items as announced.",
     )
 
+    wake_efficient = subparsers.add_parser(
+        "wake-efficient",
+        help="Run an openwakeword daemon that starts Whisper only after the wake phrase.",
+    )
+    _add_notification_store_arg(wake_efficient)
+    wake_efficient.add_argument(
+        "--iterations",
+        type=int,
+        default=1,
+        help="Wake detections to process. Use 0 only for an unbounded daemon test.",
+    )
+    wake_efficient.add_argument(
+        "--wake-timeout-seconds",
+        type=float,
+        help="Optional timeout for each openwakeword wait.",
+    )
+    wake_efficient.add_argument(
+        "--wake-threshold",
+        type=float,
+        default=0.5,
+        help="openwakeword confidence threshold.",
+    )
+    wake_efficient.add_argument(
+        "--wakeword-model",
+        action="append",
+        default=[],
+        help="Custom openwakeword model path for the Eclipse phrase. Can be repeated.",
+    )
+    wake_efficient.add_argument(
+        "--command-seconds",
+        type=int,
+        default=5,
+        help="Command clip length after the wake phrase is detected.",
+    )
+    wake_efficient.add_argument("--audio-dir", help="Directory for temporary command WAV files.")
+    wake_efficient.add_argument("--model", default="small", help="faster-whisper model name/path.")
+    wake_efficient.add_argument("--language", default="es", help="Transcription language code.")
+    wake_efficient.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually monitor the microphone and transcribe commands.",
+    )
+    wake_efficient.add_argument(
+        "--speak",
+        action="store_true",
+        help="Actually speak Eclipse's response with local TTS.",
+    )
+    wake_efficient.add_argument(
+        "--route-execute",
+        action="store_true",
+        help="Actually execute low-risk routed desktop/browser actions.",
+    )
+    wake_efficient.add_argument(
+        "--confirmed",
+        action="store_true",
+        help="Treat confirmation-gated routed actions as user-confirmed.",
+    )
+    wake_efficient.add_argument(
+        "--mark-announced",
+        action="store_true",
+        help="When summarizing notifications, mark pending items as announced.",
+    )
+
     fedora_open = subparsers.add_parser(
         "fedora-open",
         help="Prepare or execute a Fedora/KDE native app launch.",
@@ -230,6 +305,47 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("fedora-windows", help="Show planned KDE window-control strategy.")
+
+    fedora_screenshot = subparsers.add_parser(
+        "fedora-screenshot",
+        help="Capture a Wayland screenshot with grim. Dry-run by default.",
+    )
+    fedora_screenshot.add_argument("--output", help="Optional output PNG path.")
+    fedora_screenshot.add_argument(
+        "--geometry",
+        help='Optional grim geometry, for example "10,20 800x600".',
+    )
+    fedora_screenshot.add_argument(
+        "--select-region",
+        action="store_true",
+        help="Use slurp to select a region before calling grim.",
+    )
+    fedora_screenshot.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually capture the screenshot instead of dry-running.",
+    )
+
+    fedora_type = subparsers.add_parser(
+        "fedora-type",
+        help="Type text through ydotool. Requires --confirmed even in dry-run.",
+    )
+    fedora_type.add_argument("--text", required=True, help="Text to type into the focused surface.")
+    fedora_type.add_argument(
+        "--socket-path",
+        default=DEFAULT_YDOTOOL_SOCKET,
+        help="ydotoold socket path. Defaults to the Eclipse setup socket.",
+    )
+    fedora_type.add_argument(
+        "--confirmed",
+        action="store_true",
+        help="Required before Eclipse can simulate native input.",
+    )
+    fedora_type.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually type through ydotool instead of preparing the command.",
+    )
 
     notifications_ingest = subparsers.add_parser(
         "notifications-ingest",
@@ -488,12 +604,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Decompose a natural-language instruction into tool-level actions.",
     )
     plan.add_argument("--instruction", required=True, help="Instruction to decompose.")
+    _add_planner_args(plan)
 
     route_plan = subparsers.add_parser(
         "route-plan",
         help="Route a natural-language instruction to local tools. Dry-run by default.",
     )
     route_plan.add_argument("--instruction", required=True, help="Instruction to route.")
+    _add_planner_args(route_plan)
     route_plan.add_argument(
         "--execute",
         action="store_true",
@@ -503,6 +621,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--confirmed",
         action="store_true",
         help="Mark medium-risk actions as confirmed for this run.",
+    )
+
+    telemetry_report = subparsers.add_parser(
+        "telemetry-report",
+        help="Show planning layer usage metrics.",
+    )
+    telemetry_report.add_argument(
+        "--days",
+        type=int,
+        default=5,
+        help="Number of days to include in the report.",
+    )
+    telemetry_report.add_argument(
+        "--telemetry-store",
+        help="Optional SQLite telemetry store path.",
     )
 
     browser_snapshot = subparsers.add_parser(
@@ -574,6 +707,41 @@ def _add_notification_store_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--store",
         help="Optional SQLite notification store path. Defaults to ~/.local/share.",
+    )
+
+
+def _add_planner_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--planner-endpoint",
+        default=None,
+        help="OpenAI-compatible local LLM base URL. Defaults to Ollama on localhost.",
+    )
+    parser.add_argument(
+        "--planner-model",
+        default=None,
+        help="Local LLM model name. Defaults to qwen2.5:7b.",
+    )
+    parser.add_argument(
+        "--planner-api-key",
+        help="Planner API key. Prefer --planner-api-key-env for shell history safety.",
+    )
+    parser.add_argument(
+        "--planner-api-key-env",
+        default="ECLIPSE_LLM_API_KEY",
+        help="Environment variable containing the planner API key.",
+    )
+    parser.add_argument(
+        "--disable-smart-layer",
+        action="store_true",
+        help="Disable local LLM fallback and use only deterministic planning.",
+    )
+    parser.add_argument(
+        "--telemetry-store",
+        help="Optional SQLite telemetry store path.",
+    )
+    parser.add_argument(
+        "--mcp-config",
+        help="Optional JSON file containing local STDIO MCP server definitions.",
     )
 
 
@@ -700,6 +868,31 @@ def main(argv: list[str] | None = None) -> int:
         print(render_wake_loop_result(result))
         return 0 if result.success else 1
 
+    if args.command == "wake-efficient":
+        runtime = WakeRuntime(
+            listener_factory=lambda: ListenOnce(
+                stt=LocalWhisperSTT(model_name=args.model, language=args.language),
+            ),
+            wake_trigger=OpenWakeWordTrigger(
+                model_paths=tuple(args.wakeword_model),
+                threshold=args.wake_threshold,
+            ),
+            store=_notification_store(args),
+        )
+        result = runtime.run_efficient(
+            iterations=args.iterations,
+            command_seconds=args.command_seconds,
+            audio_dir=args.audio_dir,
+            dry_run=not args.execute,
+            speak=args.speak,
+            route_execute=args.route_execute,
+            confirmed=args.confirmed,
+            mark_announced=args.mark_announced,
+            wake_timeout_seconds=args.wake_timeout_seconds,
+        )
+        print(render_efficient_wake_loop_result(result))
+        return 0 if result.success else 1
+
     if args.command == "fedora-open":
         result = FedoraNativeController().open_app(args.app, dry_run=not args.execute)
         print(render_fedora_control_result(result))
@@ -708,6 +901,31 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "fedora-windows":
         print(render_fedora_control_result(FedoraNativeController().list_windows_command()))
         return 0
+
+    if args.command == "fedora-screenshot":
+        capture = WaylandScreenCapture()
+        if args.select_region:
+            result = capture.capture_selected_region(
+                output_path=args.output,
+                dry_run=not args.execute,
+            )
+        else:
+            result = capture.capture(
+                output_path=args.output,
+                geometry=args.geometry,
+                dry_run=not args.execute,
+            )
+        print(render_fedora_control_result(result))
+        return 0 if result.success else 1
+
+    if args.command == "fedora-type":
+        result = WaylandNativeInput(socket_path=args.socket_path).type_text(
+            args.text,
+            confirmed=args.confirmed,
+            dry_run=not args.execute,
+        )
+        print(render_fedora_control_result(result))
+        return 0 if result.success else 1
 
     if args.command == "notifications-ingest":
         store = _notification_store(args)
@@ -877,16 +1095,36 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result.success else 1
 
     if args.command == "plan":
-        print(create_action_plan(args.instruction).render())
+        router = ToolRouter.from_config_file(args.mcp_config)
+        print(
+            create_action_plan(
+                args.instruction,
+                llm_config=_planner_config(args),
+                available_tools=router.planner_tools(),
+                telemetry_store=_telemetry_store(args),
+                smart_layer_enabled=not args.disable_smart_layer,
+            ).render()
+        )
         return 0
 
     if args.command == "route-plan":
-        plan = create_action_plan(args.instruction)
+        router = ToolRouter.from_config_file(args.mcp_config)
+        plan = create_action_plan(
+            args.instruction,
+            llm_config=_planner_config(args),
+            available_tools=router.planner_tools(),
+            telemetry_store=_telemetry_store(args),
+            smart_layer_enabled=not args.disable_smart_layer,
+        )
         context = ToolExecutionContext(
             dry_run=not args.execute,
             confirmed=args.confirmed,
         )
-        print(render_tool_results(ToolRouter().route_plan(plan, context)))
+        print(render_tool_results(router.route_plan(plan, context)))
+        return 0
+
+    if args.command == "telemetry-report":
+        print(render_telemetry_summary(_telemetry_store(args).summarize(days=args.days)))
         return 0
 
     if args.command == "browser-snapshot":
@@ -927,6 +1165,19 @@ def main(argv: list[str] | None = None) -> int:
 
 def _browser_plan_exit_code(status: BrowserActionStatus) -> int:
     return 0 if status in {BrowserActionStatus.PREPARED, BrowserActionStatus.EXECUTED} else 1
+
+
+def _planner_config(args: argparse.Namespace) -> LLMPlannerConfig:
+    return build_planner_config_from_env(
+        endpoint_url=args.planner_endpoint,
+        model=args.planner_model,
+        api_key=args.planner_api_key,
+        api_key_env=args.planner_api_key_env,
+    )
+
+
+def _telemetry_store(args: argparse.Namespace) -> ExecutionTelemetryStore:
+    return ExecutionTelemetryStore(getattr(args, "telemetry_store", None))
 
 
 if __name__ == "__main__":
