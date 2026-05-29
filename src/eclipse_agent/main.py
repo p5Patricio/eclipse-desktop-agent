@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from eclipse_agent import __version__
 from eclipse_agent.activation import ActivationMode, build_activation_policy
@@ -26,6 +27,11 @@ from eclipse_agent.notification_intents import (
 from eclipse_agent.notification_replies import (
     NotificationReplyWorkflow,
     render_notification_reply_draft_result,
+)
+from eclipse_agent.notification_service import (
+    NotificationServiceSpec,
+    NotificationUserServiceManager,
+    render_notification_service_result,
 )
 from eclipse_agent.notifications import (
     DBusNotificationListenerPlan,
@@ -298,6 +304,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--execute",
         action="store_true",
         help="Actually run agent-browser instead of dry-running.",
+    )
+
+    notifications_service = subparsers.add_parser(
+        "notifications-service",
+        help="Render/install the systemd user service for notification listening.",
+    )
+    notifications_service.add_argument(
+        "--action",
+        choices=("render", "install", "enable-now"),
+        default="render",
+        help="Service management action. Defaults to rendering the unit.",
+    )
+    notifications_service.add_argument(
+        "--seconds",
+        type=int,
+        default=0,
+        help="Listener duration for ExecStart. Use 0 for long-running service.",
+    )
+    notifications_service.add_argument(
+        "--speak",
+        action="store_true",
+        help="Allow the service to speak notifications when rules allow it.",
+    )
+    notifications_service.add_argument("--store", help="Optional SQLite notification store path.")
+    notifications_service.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually write or enable/start the user service.",
     )
 
     plan = subparsers.add_parser(
@@ -595,6 +629,24 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=not args.execute,
         )
         print(render_notification_reply_draft_result(result))
+        return 0 if result.success else 1
+
+    if args.command == "notifications-service":
+        manager = NotificationUserServiceManager(
+            spec=NotificationServiceSpec(
+                project_dir=Path.cwd(),
+                seconds=args.seconds,
+                speak=args.speak,
+                store_path=Path(args.store).expanduser() if args.store else None,
+            )
+        )
+        if args.action == "install":
+            result = manager.install(dry_run=not args.execute)
+        elif args.action == "enable-now":
+            result = manager.enable_now(dry_run=not args.execute)
+        else:
+            result = manager.render()
+        print(render_notification_service_result(result))
         return 0 if result.success else 1
 
     if args.command == "plan":

@@ -28,9 +28,10 @@ Primer work unit implementado en `src/eclipse_agent/notifications.py`:
 | 9. Intents de voz | Hecho: parser determinístico para “modo juego”, “no me avises...” y “dime qué llegó”. |
 | 10. Memoria revisable/borrable | Hecho: `notifications-list` y `notifications-clear --confirmed`. |
 | 11. Respuesta en borrador | Hecho: `notifications-reply-draft` abre/snapshotea web app o rellena un ref confirmado sin enviar. |
+| 12. Servicio de usuario | Hecho: `notifications-service` renderiza/instala/activa un unit systemd user para el listener. |
 
-Falta endurecer el daemon como servicio de usuario, agregar selector automático
-de refs para inputs de mensaje y completar adapters nativos app por app.
+Falta agregar selector automático de refs para inputs de mensaje y completar
+adapters nativos app por app.
 
 ## Decisión SQLite vs DuckDB
 
@@ -99,6 +100,13 @@ PYTHONPATH=src python -m eclipse_agent notifications-dbus-command
 # Preparar o ejecutar el listener D-Bus real durante 30 segundos.
 PYTHONPATH=src python -m eclipse_agent notifications-listen --seconds 30
 PYTHONPATH=src python -m eclipse_agent notifications-listen --seconds 30 --execute
+
+# Renderizar o instalar el servicio systemd de usuario.
+PYTHONPATH=src python -m eclipse_agent notifications-service --action render
+PYTHONPATH=src python -m eclipse_agent notifications-service --action install
+PYTHONPATH=src python -m eclipse_agent notifications-service --action install --execute
+PYTHONPATH=src python -m eclipse_agent notifications-service --action enable-now
+PYTHONPATH=src python -m eclipse_agent notifications-service --action enable-now --execute
 
 # Ejecutar comandos como si vinieran de voz/STT.
 PYTHONPATH=src python -m eclipse_agent notifications-intent \
@@ -250,8 +258,7 @@ Eclipse Brain opcional
 
 ## Siguiente implementación recomendada
 
-1. Convertir `notifications-listen` en servicio systemd de usuario.
-2. Marcar eventos como `replied` cuando el usuario confirme que el mensaje se envió.
-3. Respuesta dictada con `LocalWhisperSTT` integrada directo al reply workflow.
-4. Selector automático de refs para inputs de Instagram/Messenger.
-5. Control nativo con D-Bus/AT-SPI cuando una app no sea web.
+1. Marcar eventos como `replied` cuando el usuario confirme que el mensaje se envió.
+2. Respuesta dictada con `LocalWhisperSTT` integrada directo al reply workflow.
+3. Selector automático de refs para inputs de Instagram/Messenger.
+4. Control nativo con D-Bus/AT-SPI cuando una app no sea web.

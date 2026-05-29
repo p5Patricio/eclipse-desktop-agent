@@ -154,6 +154,7 @@ Estado del primer work unit:
 - `notifications-mode`, `notifications-mute`, `notifications-ingest`,
   `notifications-summary` y `notifications-dbus-command` permiten validar el flujo.
 - `notifications-listen` ejecuta el primer listener D-Bus con `dbus-monitor`.
+- `notifications-service` renderiza/instala/activa el servicio systemd de usuario.
 - `notifications-intent` cubre frases como “modo juego”, “no me avises...”
   y “dime qué llegó”.
 - `notifications-reply-draft` prepara respuestas web en borrador sin enviar.
