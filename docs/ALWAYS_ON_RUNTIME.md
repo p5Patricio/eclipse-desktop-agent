@@ -12,6 +12,24 @@ Daemon local always-on
   -> vuelve a reposo
 ```
 
+## Estado implementado
+
+El MVP ya tiene un loop acotado `wake-loop` para pruebas reales:
+
+```txt
+wake-loop
+  -> graba una ventana corta para detectar “Eclipse”
+  -> si la frase viene con comando, lo ejecuta en pipeline seguro
+  -> si solo escucha “Eclipse”, graba una segunda ventana de comando
+  -> intenta intents de notificaciones primero
+  -> si no aplica, usa planner + ToolRouter en modo seguro/dry-run
+  -> opcionalmente responde por TTS con --speak
+```
+
+La detección inicial usa STT local en ventanas cortas con `faster-whisper`.
+Esto permite probar el flujo completo sin APIs pagadas. Más adelante se puede
+sustituir esa primera ventana por un hotword engine dedicado para reducir CPU.
+
 ## Impacto de recursos
 
 | Modo | RAM en espera | CPU en espera | Disco | Comentario |
@@ -41,3 +59,38 @@ Notas:
 2. CLI `status` para mostrar el modo activo.
 3. CLI `resource-plan` para explicar recursos estimados.
 4. Tests que protejan la decisión: default `wake_word`, no STT continuo.
+
+## Prueba real recomendada
+
+```bash
+# Usar el venv porque ahí está faster-whisper.
+PYTHONPATH=src venv/bin/python -m eclipse_agent diagnostics
+PYTHONPATH=src venv/bin/python -m eclipse_agent listen-status
+
+# Probar el pipeline sin micrófono, como si STT ya hubiera transcrito.
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-command \
+  --text "Eclipse, modo juego por una hora"
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-command \
+  --text "Eclipse, dime qué llegó"
+
+# Preparar comandos de grabación sin tocar el micrófono.
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop --iterations 1
+
+# Prueba real con micrófono: decir “Eclipse, dime qué llegó”.
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop \
+  --iterations 1 \
+  --wake-seconds 4 \
+  --execute
+
+# Si quieres que hable la respuesta.
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop \
+  --iterations 1 \
+  --wake-seconds 4 \
+  --execute \
+  --speak
+```
+
+Por seguridad, `wake-loop --execute` sí graba/transcribe audio, pero las acciones
+de escritorio/navegador siguen en dry-run. Para ejecutar acciones ruteadas de bajo
+riesgo se requiere `--route-execute`; para acciones de riesgo medio, también
+`--confirmed`.

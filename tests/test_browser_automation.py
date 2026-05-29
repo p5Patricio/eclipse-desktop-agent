@@ -2,10 +2,15 @@ from eclipse_agent.browser_automation import (
     AgentBrowserAdapter,
     BrowserActionStatus,
     BrowserAutomationProfile,
+    BrowserAutomationRequest,
+    BrowserAutomationResult,
     BrowserCommandKind,
+    BrowserInteractionPlan,
+    BrowserInteractionStep,
     BrowserInteractionLoop,
     domain_from_url,
     parse_agent_browser_snapshot_json,
+    render_browser_interaction_plan,
     validate_browser_url,
     validate_snapshot_ref,
 )
@@ -133,6 +138,37 @@ def test_browser_interaction_loop_open_and_snapshot():
     assert plan.status is BrowserActionStatus.PREPARED
     assert plan.requires_confirmation is False
     assert plan.results[0].command[-1] == "snapshot -i"
+
+
+def test_render_browser_interaction_plan_includes_failure_detail():
+    step = BrowserInteractionStep(
+        kind=BrowserCommandKind.SNAPSHOT,
+        description="Open URL and collect snapshot.",
+        requires_confirmation=False,
+        request=BrowserAutomationRequest(
+            kind=BrowserCommandKind.SNAPSHOT,
+            url="https://example.com",
+        ),
+    )
+    result = BrowserAutomationResult(
+        success=False,
+        kind=BrowserCommandKind.SNAPSHOT,
+        command=("agent-browser", "snapshot"),
+        message="agent-browser command failed.",
+        dry_run=False,
+        stdout='{"success":false,"error":"sandbox blocked"}',
+    )
+    plan = BrowserInteractionPlan(
+        steps=(step,),
+        results=(result,),
+        status=BrowserActionStatus.FAILED,
+        message="Browser interaction failed to prepare.",
+    )
+
+    rendered = render_browser_interaction_plan(plan)
+
+    assert "detail:" in rendered
+    assert "sandbox blocked" in rendered
 
 
 def test_domain_from_url_normalizes_hostname():

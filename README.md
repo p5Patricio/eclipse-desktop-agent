@@ -67,6 +67,7 @@ src/eclipse_agent/          Núcleo Python inicial
   safety.py                 Modelo inicial de política de seguridad
   tool_router.py            Ruteo de acciones planeadas a tools locales
   voice.py                  TTS local y facade STT
+  wake_runtime.py           Loop wake/listen/respond acotado para pruebas reales
 docs/                       Plan, arquitectura, seguridad y OpenClaw
   adr/                      Decisiones arquitectónicas
 ```
@@ -84,6 +85,12 @@ PYTHONPATH=src python -m eclipse_agent smoke-plan
 PYTHONPATH=src python -m eclipse_agent smoke-simulate
 PYTHONPATH=src python -m eclipse_agent say --text "Hola, soy Eclipse."
 PYTHONPATH=src venv/bin/python -m eclipse_agent listen --seconds 3
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-command \
+  --text "Eclipse, dime qué llegó"
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop --iterations 1
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop \
+  --iterations 1 \
+  --execute
 PYTHONPATH=src python -m eclipse_agent resource-plan
 PYTHONPATH=src python -m eclipse_agent plan \
   --instruction "Reproduce El lado oscuro en YouTube Music, también abre Instagram"

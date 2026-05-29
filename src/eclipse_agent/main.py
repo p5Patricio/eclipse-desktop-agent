@@ -15,6 +15,7 @@ from eclipse_agent.agent_smoke import (
     run_agent_smoke_simulation,
 )
 from eclipse_agent.browser_automation import (
+    BrowserActionStatus,
     BrowserCommandKind,
     BrowserInteractionLoop,
     render_browser_interaction_plan,
@@ -62,6 +63,11 @@ from eclipse_agent.runtime_diagnostics import collect_runtime_diagnostics
 from eclipse_agent.tool_router import ToolExecutionContext, ToolRouter, render_tool_results
 from eclipse_agent.voice import ListenOnce, LocalWhisperSTT, SystemTTS
 from eclipse_agent.voice import render_listen_result, render_speech_result
+from eclipse_agent.wake_runtime import (
+    WakeRuntime,
+    render_wake_command_result,
+    render_wake_loop_result,
+)
 
 RUNTIME_MODES = ("observe", "draft", "copilot", "autonomous")
 
@@ -136,6 +142,81 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe.add_argument("--audio-path", required=True, help="Audio file to transcribe.")
     transcribe.add_argument("--model", default="small", help="faster-whisper model name/path.")
     transcribe.add_argument("--language", default="es", help="Transcription language code.")
+
+    wake_command = subparsers.add_parser(
+        "wake-command",
+        help="Handle an already-transcribed wake command through Eclipse runtime routing.",
+    )
+    _add_notification_store_arg(wake_command)
+    wake_command.add_argument("--text", required=True, help="Transcribed command text.")
+    wake_command.add_argument(
+        "--speak",
+        action="store_true",
+        help="Actually speak Eclipse's response with local TTS.",
+    )
+    wake_command.add_argument(
+        "--route-execute",
+        action="store_true",
+        help="Actually execute low-risk routed desktop/browser actions.",
+    )
+    wake_command.add_argument(
+        "--confirmed",
+        action="store_true",
+        help="Treat medium-risk routed actions as user-confirmed.",
+    )
+    wake_command.add_argument(
+        "--mark-announced",
+        action="store_true",
+        help="When summarizing notifications, mark pending items as announced.",
+    )
+
+    wake_loop = subparsers.add_parser(
+        "wake-loop",
+        help="Run a bounded wake/listen/respond loop. Dry-run by default.",
+    )
+    _add_notification_store_arg(wake_loop)
+    wake_loop.add_argument("--wake-phrase", default="Eclipse", help="Wake phrase to detect.")
+    wake_loop.add_argument(
+        "--iterations",
+        type=int,
+        default=1,
+        help="Wake windows to process. Use 0 only for an unbounded daemon test.",
+    )
+    wake_loop.add_argument("--wake-seconds", type=int, default=2, help="Wake clip length.")
+    wake_loop.add_argument(
+        "--command-seconds",
+        type=int,
+        default=5,
+        help="Command clip length when the wake clip only contains the wake phrase.",
+    )
+    wake_loop.add_argument("--audio-dir", help="Directory for temporary wake/command WAV files.")
+    wake_loop.add_argument("--model", default="small", help="faster-whisper model name/path.")
+    wake_loop.add_argument("--language", default="es", help="Transcription language code.")
+    wake_loop.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually record/transcribe microphone audio instead of dry-running.",
+    )
+    wake_loop.add_argument(
+        "--speak",
+        action="store_true",
+        help="Actually speak Eclipse's response with local TTS.",
+    )
+    wake_loop.add_argument(
+        "--route-execute",
+        action="store_true",
+        help="Actually execute low-risk routed desktop/browser actions.",
+    )
+    wake_loop.add_argument(
+        "--confirmed",
+        action="store_true",
+        help="Treat medium-risk routed actions as user-confirmed.",
+    )
+    wake_loop.add_argument(
+        "--mark-announced",
+        action="store_true",
+        help="When summarizing notifications, mark pending items as announced.",
+    )
 
     fedora_open = subparsers.add_parser(
         "fedora-open",
@@ -586,6 +667,39 @@ def main(argv: list[str] | None = None) -> int:
         print(f"text: {result.text}")
         return 0
 
+    if args.command == "wake-command":
+        result = WakeRuntime(store=_notification_store(args)).handle_command(
+            args.text,
+            speak=args.speak,
+            route_execute=args.route_execute,
+            confirmed=args.confirmed,
+            mark_announced=args.mark_announced,
+        )
+        print(render_wake_command_result(result))
+        return 0 if result.success else 1
+
+    if args.command == "wake-loop":
+        runtime = WakeRuntime(
+            listener=ListenOnce(
+                stt=LocalWhisperSTT(model_name=args.model, language=args.language),
+            ),
+            store=_notification_store(args),
+        )
+        result = runtime.run(
+            wake_phrase=args.wake_phrase,
+            iterations=args.iterations,
+            wake_seconds=args.wake_seconds,
+            command_seconds=args.command_seconds,
+            audio_dir=args.audio_dir,
+            dry_run=not args.execute,
+            speak=args.speak,
+            route_execute=args.route_execute,
+            confirmed=args.confirmed,
+            mark_announced=args.mark_announced,
+        )
+        print(render_wake_loop_result(result))
+        return 0 if result.success else 1
+
     if args.command == "fedora-open":
         result = FedoraNativeController().open_app(args.app, dry_run=not args.execute)
         print(render_fedora_control_result(result))
@@ -781,7 +895,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=not args.execute,
         )
         print(render_browser_interaction_plan(interaction_plan))
-        return 0
+        return _browser_plan_exit_code(interaction_plan.status)
 
     if args.command == "browser-action":
         interaction_plan = BrowserInteractionLoop().confirmed_ref_action(
@@ -793,7 +907,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=not args.execute,
         )
         print(render_browser_interaction_plan(interaction_plan))
-        return 0
+        return _browser_plan_exit_code(interaction_plan.status)
 
     if args.command == "coding-prompt":
         agent = get_coding_agent(args.agent)
@@ -809,6 +923,10 @@ def main(argv: list[str] | None = None) -> int:
 
     _print_status(config)
     return 0
+
+
+def _browser_plan_exit_code(status: BrowserActionStatus) -> int:
+    return 0 if status in {BrowserActionStatus.PREPARED, BrowserActionStatus.EXECUTED} else 1
 
 
 if __name__ == "__main__":

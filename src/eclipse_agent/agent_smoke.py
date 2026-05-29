@@ -107,6 +107,37 @@ def build_agent_smoke_plan(*, store_path: str | Path | None = None) -> tuple[Age
             expected="Shows Instagram/Messenger digest and marks events announced.",
         ),
         AgentSmokeStep(
+            name="wake-command-pipeline",
+            goal="Verify the post-STT wake pipeline can route a spoken notification intent.",
+            command=(
+                "python",
+                "-m",
+                "eclipse_agent",
+                "wake-command",
+                *store_args,
+                "--text",
+                "Eclipse, dime qué llegó",
+            ),
+            expected="Routes the command through notification intents without using the mic.",
+        ),
+        AgentSmokeStep(
+            name="wake-loop-microphone",
+            goal="Run one bounded real microphone wake/listen/respond pass.",
+            command=(
+                "python",
+                "-m",
+                "eclipse_agent",
+                "wake-loop",
+                *store_args,
+                "--iterations",
+                "1",
+                "--wake-seconds",
+                "4",
+                "--execute",
+            ),
+            expected="Say 'Eclipse, dime qué llegó'; Eclipse transcribes and responds safely.",
+        ),
+        AgentSmokeStep(
             name="browser-snapshot",
             goal="Open/snapshot the web app in the controlled browser.",
             command=(

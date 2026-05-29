@@ -515,6 +515,10 @@ def render_browser_interaction_plan(plan: BrowserInteractionPlan) -> str:
         lines.append(f"  result [{status}]: {result.message}")
         if result.command:
             lines.append(f"  command: {shlex_join(result.command)}")
+        if not result.success:
+            detail = result.stderr.strip() or result.stdout.strip()
+            if detail:
+                lines.append(f"  detail: {detail[:500]}")
         if result.stdout and result.kind is BrowserCommandKind.SNAPSHOT:
             try:
                 snapshot = parse_agent_browser_snapshot_json(result.stdout)

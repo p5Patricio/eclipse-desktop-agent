@@ -31,9 +31,11 @@ Primer work unit implementado en `src/eclipse_agent/notifications.py`:
 | 12. Servicio de usuario | Hecho: `notifications-service` renderiza/instala/activa un unit systemd user para el listener. |
 | 13. Estado post-respuesta | Hecho: `notifications-mark --status replied --confirmed`. |
 | 14. Smoke test | Hecho: `smoke-plan` y `smoke-simulate` para ensayo local/controlado. |
+| 15. Selector automático de refs | Hecho: `--snapshot-json --auto-select` elige inputs probables de mensaje. |
+| 16. Wake/listen/respond | Hecho: `wake-command` y `wake-loop` conectan voz, intents de notificación, planner, router y TTS. |
 
-Falta agregar selector automático de refs para inputs de mensaje y completar
-adapters nativos app por app.
+Falta completar adapters nativos app por app y reemplazar la detección inicial
+por un hotword engine dedicado si necesitamos menor consumo en reposo.
 
 ## Decisión SQLite vs DuckDB
 
@@ -118,6 +120,17 @@ PYTHONPATH=src python -m eclipse_agent notifications-intent \
 PYTHONPATH=src python -m eclipse_agent notifications-intent \
   --text "Dime qué llegó" \
   --mark-announced
+
+# Ejecutar el pipeline de voz completo desde texto transcrito.
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-command \
+  --text "Eclipse, dime qué llegó" \
+  --mark-announced
+
+# Prueba real acotada con micrófono y STT local.
+PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop \
+  --iterations 1 \
+  --wake-seconds 4 \
+  --execute
 
 # Revisar o borrar memoria local de notificaciones.
 PYTHONPATH=src python -m eclipse_agent notifications-list --status queued
