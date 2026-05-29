@@ -27,7 +27,7 @@ Primer work unit implementado en `src/eclipse_agent/notifications.py`:
 | 8. Daemon D-Bus inicial | Hecho: `notifications-listen` conecta `dbus-monitor` con `NotificationCenter`. |
 | 9. Intents de voz | Hecho: parser determinístico para “modo juego”, “no me avises...” y “dime qué llegó”. |
 | 10. Memoria revisable/borrable | Hecho: `notifications-list` y `notifications-clear --confirmed`. |
-| 11. Respuesta en borrador | Hecho: `notifications-reply-draft` abre/snapshotea web app o rellena un ref confirmado sin enviar. |
+| 11. Respuesta en borrador | Hecho: `notifications-reply-draft` acepta `--message` o `--audio-path`, abre/snapshotea web app o rellena un ref confirmado sin enviar. |
 | 12. Servicio de usuario | Hecho: `notifications-service` renderiza/instala/activa un unit systemd user para el listener. |
 
 Falta agregar selector automático de refs para inputs de mensaje y completar
@@ -127,6 +127,9 @@ PYTHONPATH=src python -m eclipse_agent notifications-clear \
 PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
   --event-id EVENT_ID \
   --message "Ahorita entro"
+PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
+  --event-id EVENT_ID \
+  --audio-path /tmp/eclipse-reply.wav
 PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
   --event-id EVENT_ID \
   --message "Ahorita entro" \
@@ -259,6 +262,6 @@ Eclipse Brain opcional
 ## Siguiente implementación recomendada
 
 1. Marcar eventos como `replied` cuando el usuario confirme que el mensaje se envió.
-2. Respuesta dictada con `LocalWhisperSTT` integrada directo al reply workflow.
+2. Grabar audio directo desde el reply workflow, no solo transcribir `--audio-path`.
 3. Selector automático de refs para inputs de Instagram/Messenger.
 4. Control nativo con D-Bus/AT-SPI cuando una app no sea web.

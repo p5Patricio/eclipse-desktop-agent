@@ -27,6 +27,7 @@ from eclipse_agent.notification_intents import (
 from eclipse_agent.notification_replies import (
     NotificationReplyWorkflow,
     render_notification_reply_draft_result,
+    resolve_reply_text,
 )
 from eclipse_agent.notification_service import (
     NotificationServiceSpec,
@@ -290,7 +291,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_notification_store_arg(notifications_reply)
     notifications_reply.add_argument("--event-id", required=True, help="Notification id.")
-    notifications_reply.add_argument("--message", required=True, help="Reply draft text.")
+    notifications_reply.add_argument(
+        "--message",
+        help="Reply draft text. If omitted, use --audio-path for local STT.",
+    )
+    notifications_reply.add_argument(
+        "--audio-path",
+        help="Optional local audio file to transcribe as reply text.",
+    )
+    notifications_reply.add_argument("--model", default="small", help="faster-whisper model.")
+    notifications_reply.add_argument("--language", default="es", help="STT language code.")
     notifications_reply.add_argument(
         "--selector",
         help="Optional agent-browser snapshot ref for the message input, e.g. @e12.",
@@ -621,9 +631,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "notifications-reply-draft":
         store = _notification_store(args)
+        text_result = resolve_reply_text(
+            message=args.message,
+            audio_path=args.audio_path,
+            transcriber=LocalWhisperSTT(model_name=args.model, language=args.language),
+        )
+        if not text_result.success:
+            print(f"Notification reply draft [blocked]: {text_result.message}")
+            return 1
         result = NotificationReplyWorkflow(store=store).prepare_reply_draft(
             event_id=args.event_id,
-            reply_text=args.message,
+            reply_text=text_result.text,
             selector=args.selector,
             confirmed=args.confirmed,
             dry_run=not args.execute,

@@ -157,8 +157,9 @@ Estado del primer work unit:
 - `notifications-service` renderiza/instala/activa el servicio systemd de usuario.
 - `notifications-intent` cubre frases como “modo juego”, “no me avises...”
   y “dime qué llegó”.
-- `notifications-reply-draft` prepara respuestas web en borrador sin enviar.
-- Falta empaquetarlo como servicio de usuario y automatizar selección de refs.
+- `notifications-reply-draft` prepara respuestas web en borrador sin enviar y puede
+  usar `--message` o transcribir `--audio-path`.
+- Falta automatizar selección de refs y completar adapters nativos app por app.
 
 ## Fase 4.5 — Bridge de agentes de codificación
 

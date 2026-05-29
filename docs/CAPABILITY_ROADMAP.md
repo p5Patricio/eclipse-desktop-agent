@@ -90,9 +90,9 @@ Este documento resume qué ya existe como scaffold y qué falta para que Eclipse
 - Listener D-Bus ejecutable con `notifications-listen`: hecho.
 - Intents de voz para modo juego, silenciar y resumen: hecho.
 - Listar/limpiar memoria local: hecho.
-- Reply draft web con agent-browser y confirmación: hecho.
+- Reply draft web con agent-browser, confirmación y texto desde `--message`/`--audio-path`: hecho.
 - Servicio systemd de usuario para listener: hecho.
-- Falta selector automático de refs y adapters nativos app por app.
+- Falta grabación directa desde reply workflow, selector automático de refs y adapters nativos app por app.
 
 ## Regla de seguridad
 

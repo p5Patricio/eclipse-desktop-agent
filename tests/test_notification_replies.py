@@ -1,8 +1,10 @@
 from eclipse_agent.notification_replies import (
     NotificationReplyWorkflow,
     reply_url_for_event,
+    resolve_reply_text,
 )
 from eclipse_agent.notifications import NotificationStore, create_notification_event
+from eclipse_agent.voice import TranscriptionResult
 
 
 def _stored_instagram_event(store: NotificationStore) -> str:
@@ -73,3 +75,37 @@ def test_confirmed_reply_draft_prepares_fill_action(tmp_path):
         "@e7",
         "Ahorita entro.",
     )
+
+
+def test_resolve_reply_text_prefers_explicit_message():
+    result = resolve_reply_text(message="  Ahorita   entro.  ")
+
+    assert result.success is True
+    assert result.text == "Ahorita entro."
+
+
+def test_resolve_reply_text_blocks_without_message_or_audio():
+    result = resolve_reply_text()
+
+    assert result.success is False
+    assert "required" in result.message
+
+
+def test_resolve_reply_text_uses_transcribed_audio(tmp_path):
+    audio_path = tmp_path / "reply.wav"
+    audio_path.write_bytes(b"fake wav")
+
+    class FakeTranscriber:
+        def transcribe_file(self, path):
+            return TranscriptionResult(
+                success=True,
+                text="  Ahorita   entro  ",
+                audio_path=path,
+                provider="fake",
+                message="ok",
+            )
+
+    result = resolve_reply_text(audio_path=audio_path, transcriber=FakeTranscriber())
+
+    assert result.success is True
+    assert result.text == "Ahorita entro"
