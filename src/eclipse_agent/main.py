@@ -306,6 +306,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional agent-browser snapshot ref for the message input, e.g. @e12.",
     )
     notifications_reply.add_argument(
+        "--snapshot-json",
+        help="Optional agent-browser snapshot JSON file for automatic ref selection.",
+    )
+    notifications_reply.add_argument(
+        "--auto-select",
+        action="store_true",
+        help="Choose the most plausible message input ref from --snapshot-json.",
+    )
+    notifications_reply.add_argument(
         "--confirmed",
         action="store_true",
         help="Required before filling a browser draft field.",
@@ -450,6 +459,12 @@ def _notification_status_filter(status: str) -> tuple[NotificationStatus, ...] |
     if status == "all":
         return None
     return (NotificationStatus(status),)
+
+
+def _read_optional_text_file(path: str | None) -> str | None:
+    if not path:
+        return None
+    return Path(path).expanduser().read_text(encoding="utf-8")
 
 
 def _build_config(args: argparse.Namespace) -> EclipseConfig:
@@ -643,6 +658,8 @@ def main(argv: list[str] | None = None) -> int:
             event_id=args.event_id,
             reply_text=text_result.text,
             selector=args.selector,
+            snapshot_output=_read_optional_text_file(args.snapshot_json),
+            auto_select=args.auto_select,
             confirmed=args.confirmed,
             dry_run=not args.execute,
         )

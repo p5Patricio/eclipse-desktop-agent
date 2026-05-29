@@ -1,3 +1,5 @@
+import json
+
 from eclipse_agent.notification_replies import (
     NotificationReplyWorkflow,
     reply_url_for_event,
@@ -75,6 +77,70 @@ def test_confirmed_reply_draft_prepares_fill_action(tmp_path):
         "@e7",
         "Ahorita entro.",
     )
+
+
+def test_reply_draft_auto_selects_message_input_from_snapshot_json(tmp_path):
+    store = NotificationStore(tmp_path / "notifications.sqlite3")
+    event_id = _stored_instagram_event(store)
+    snapshot_json = json.dumps(
+        {
+            "success": True,
+            "data": {
+                "origin": "https://www.instagram.com/",
+                "refs": {
+                    "e1": {"role": "button", "name": "Enviar"},
+                    "e2": {"role": "textbox", "name": "Mensaje"},
+                },
+                "snapshot": "fixture",
+            },
+            "error": None,
+        }
+    )
+
+    result = NotificationReplyWorkflow(store=store).prepare_reply_draft(
+        event_id=event_id,
+        reply_text="Ahorita entro.",
+        snapshot_output=snapshot_json,
+        auto_select=True,
+        confirmed=True,
+    )
+
+    assert result.success is True
+    assert result.ref_selection is not None
+    assert result.ref_selection.selected_ref == "@e2"
+    assert result.browser_plan.results[0].command[-3:] == (
+        "fill",
+        "@e2",
+        "Ahorita entro.",
+    )
+
+
+def test_reply_draft_auto_select_blocks_when_snapshot_has_no_input(tmp_path):
+    store = NotificationStore(tmp_path / "notifications.sqlite3")
+    event_id = _stored_instagram_event(store)
+    snapshot_json = json.dumps(
+        {
+            "success": True,
+            "data": {
+                "origin": "https://www.instagram.com/",
+                "refs": {"e1": {"role": "button", "name": "Enviar"}},
+                "snapshot": "fixture",
+            },
+            "error": None,
+        }
+    )
+
+    result = NotificationReplyWorkflow(store=store).prepare_reply_draft(
+        event_id=event_id,
+        reply_text="Ahorita entro.",
+        snapshot_output=snapshot_json,
+        auto_select=True,
+        confirmed=True,
+    )
+
+    assert result.success is False
+    assert result.ref_selection is not None
+    assert result.ref_selection.selected_ref is None
 
 
 def test_resolve_reply_text_prefers_explicit_message():

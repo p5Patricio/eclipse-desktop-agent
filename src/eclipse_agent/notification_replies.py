@@ -14,7 +14,15 @@ from eclipse_agent.browser_automation import (
     BrowserCommandKind,
     BrowserInteractionLoop,
     BrowserInteractionPlan,
+    BrowserSnapshot,
+    parse_agent_browser_snapshot_json,
     render_browser_interaction_plan,
+)
+from eclipse_agent.browser_ref_selector import (
+    BrowserRefSelection,
+    BrowserRefPurpose,
+    render_browser_ref_selection,
+    select_browser_ref,
 )
 from eclipse_agent.notifications import (
     NotificationEvent,
@@ -40,6 +48,7 @@ class NotificationReplyDraftResult:
     event: NotificationEvent | None
     message: str
     browser_plan: BrowserInteractionPlan | None = None
+    ref_selection: BrowserRefSelection | None = None
     reply_text: str = ""
 
 
@@ -79,6 +88,8 @@ class NotificationReplyWorkflow:
         reply_text: str,
         selector: str | None = None,
         confirmed: bool = False,
+        snapshot_output: str | None = None,
+        auto_select: bool = False,
         dry_run: bool = True,
     ) -> NotificationReplyDraftResult:
         """Open the source web app or fill a confirmed draft field.
@@ -109,10 +120,33 @@ class NotificationReplyWorkflow:
                 reply_text=reply_text,
             )
 
-        if selector:
+        selected_ref = selector
+        ref_selection: BrowserRefSelection | None = None
+        if not selected_ref and snapshot_output and auto_select:
+            try:
+                snapshot = parse_agent_browser_snapshot_json(snapshot_output)
+            except ValueError as exc:
+                return NotificationReplyDraftResult(
+                    success=False,
+                    event=event,
+                    message=f"Could not parse browser snapshot JSON: {exc}",
+                    reply_text=reply_text,
+                )
+            ref_selection = select_reply_input_ref(snapshot)
+            selected_ref = ref_selection.selected_ref
+            if not selected_ref:
+                return NotificationReplyDraftResult(
+                    success=False,
+                    event=event,
+                    ref_selection=ref_selection,
+                    message="No plausible message input ref found in snapshot.",
+                    reply_text=reply_text,
+                )
+
+        if selected_ref:
             plan = self.browser_loop.confirmed_ref_action(
                 kind=BrowserCommandKind.FILL,
-                selector=selector,
+                selector=selected_ref,
                 text=reply_text,
                 confirmed=confirmed,
                 dry_run=dry_run,
@@ -122,6 +156,7 @@ class NotificationReplyWorkflow:
                 success=success,
                 event=event,
                 browser_plan=plan,
+                ref_selection=ref_selection,
                 message=(
                     "Prepared confirmed browser fill for reply draft."
                     if success
@@ -191,6 +226,12 @@ def reply_url_for_event(event: NotificationEvent) -> str | None:
     return WEB_REPLY_TARGETS.get(event.display_source)
 
 
+def select_reply_input_ref(snapshot: BrowserSnapshot) -> BrowserRefSelection:
+    """Select the most plausible message input ref from a browser snapshot."""
+
+    return select_browser_ref(snapshot, purpose=BrowserRefPurpose.MESSAGE_INPUT)
+
+
 def render_notification_reply_draft_result(result: NotificationReplyDraftResult) -> str:
     """Render reply-draft workflow output."""
 
@@ -202,6 +243,8 @@ def render_notification_reply_draft_result(result: NotificationReplyDraftResult)
         lines.append(f"draft: {result.reply_text}")
     if result.browser_plan:
         lines.append(render_browser_interaction_plan(result.browser_plan))
+    if result.ref_selection:
+        lines.append(render_browser_ref_selection(result.ref_selection))
     lines.append("Safety: Eclipse prepared a draft only; it did not send the message.")
     return "\n".join(lines)
 

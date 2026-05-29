@@ -15,7 +15,7 @@ Este documento resume qué ya existe como scaffold y qué falta para que Eclipse
 | Browser interaction loop | Snapshot JSON parseado | Elegir refs semánticas automáticamente |
 | YouTube Music | Launcher detectado | Buscar canción y reproducir resultado correcto |
 | Instagram/Messenger | URLs preparadas | Preparar respuestas sin enviar, con confirmación |
-| Notificaciones | Core SQLite/reglas/daemon/intents/servicio implementado | Selector automático de reply refs |
+| Notificaciones | Core SQLite/reglas/daemon/intents/servicio/reply selector implementado | Pruebas reales con sitios autenticados |
 | Agentes de codificación | Prompt contract | Launcher de Claude/Gemini/Codex con confirmación |
 | Memoria local | Diseñada | SQLite para eventos, permisos y auditoría |
 | Seguridad | Primitivas | Permission store, audit log y kill switch |
@@ -90,9 +90,9 @@ Este documento resume qué ya existe como scaffold y qué falta para que Eclipse
 - Listener D-Bus ejecutable con `notifications-listen`: hecho.
 - Intents de voz para modo juego, silenciar y resumen: hecho.
 - Listar/limpiar memoria local: hecho.
-- Reply draft web con agent-browser, confirmación y texto desde `--message`/`--audio-path`: hecho.
+- Reply draft web con agent-browser, confirmación, texto desde `--message`/`--audio-path` y selector automático desde snapshot JSON: hecho.
 - Servicio systemd de usuario para listener: hecho.
-- Falta grabación directa desde reply workflow, selector automático de refs y adapters nativos app por app.
+- Falta grabación directa desde reply workflow, ajustar selector con snapshots reales y adapters nativos app por app.
 
 ## Regla de seguridad
 

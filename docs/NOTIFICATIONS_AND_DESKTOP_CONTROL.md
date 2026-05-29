@@ -27,7 +27,7 @@ Primer work unit implementado en `src/eclipse_agent/notifications.py`:
 | 8. Daemon D-Bus inicial | Hecho: `notifications-listen` conecta `dbus-monitor` con `NotificationCenter`. |
 | 9. Intents de voz | Hecho: parser determinístico para “modo juego”, “no me avises...” y “dime qué llegó”. |
 | 10. Memoria revisable/borrable | Hecho: `notifications-list` y `notifications-clear --confirmed`. |
-| 11. Respuesta en borrador | Hecho: `notifications-reply-draft` acepta `--message` o `--audio-path`, abre/snapshotea web app o rellena un ref confirmado sin enviar. |
+| 11. Respuesta en borrador | Hecho: `notifications-reply-draft` acepta `--message` o `--audio-path`, abre/snapshotea web app, puede autoseleccionar un input desde snapshot JSON y rellena un ref confirmado sin enviar. |
 | 12. Servicio de usuario | Hecho: `notifications-service` renderiza/instala/activa un unit systemd user para el listener. |
 
 Falta agregar selector automático de refs para inputs de mensaje y completar
@@ -134,6 +134,12 @@ PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
   --event-id EVENT_ID \
   --message "Ahorita entro" \
   --selector @e7 \
+  --confirmed
+PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
+  --event-id EVENT_ID \
+  --message "Ahorita entro" \
+  --snapshot-json /tmp/instagram-snapshot.json \
+  --auto-select \
   --confirmed
 ```
 
@@ -263,5 +269,6 @@ Eclipse Brain opcional
 
 1. Marcar eventos como `replied` cuando el usuario confirme que el mensaje se envió.
 2. Grabar audio directo desde el reply workflow, no solo transcribir `--audio-path`.
-3. Selector automático de refs para inputs de Instagram/Messenger.
+3. Probar selector automático con snapshots reales de Instagram/Messenger/Gmail
+   y ajustar heurísticas por sitio.
 4. Control nativo con D-Bus/AT-SPI cuando una app no sea web.

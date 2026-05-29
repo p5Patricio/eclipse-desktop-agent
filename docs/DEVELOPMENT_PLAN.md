@@ -159,7 +159,9 @@ Estado del primer work unit:
   y “dime qué llegó”.
 - `notifications-reply-draft` prepara respuestas web en borrador sin enviar y puede
   usar `--message` o transcribir `--audio-path`.
-- Falta automatizar selección de refs y completar adapters nativos app por app.
+- El reply workflow puede autoseleccionar un input desde un snapshot JSON con
+  heurísticas conservadoras.
+- Falta validar heurísticas con snapshots reales y completar adapters nativos app por app.
 
 ## Fase 4.5 — Bridge de agentes de codificación
 

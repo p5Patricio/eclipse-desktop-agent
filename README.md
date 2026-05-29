@@ -116,6 +116,12 @@ PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
 PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
   --event-id EVENT_ID \
   --audio-path /tmp/eclipse-reply.wav
+PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
+  --event-id EVENT_ID \
+  --message "Ahorita entro" \
+  --snapshot-json /tmp/instagram-snapshot.json \
+  --auto-select \
+  --confirmed
 PYTHONPATH=src python -m eclipse_agent notifications-service --action render
 PYTHONPATH=src python -m eclipse_agent notifications-service --action install
 ```
