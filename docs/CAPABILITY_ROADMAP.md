@@ -19,6 +19,7 @@ Este documento resume qué ya existe como scaffold y qué falta para que Eclipse
 | Agentes de codificación | Prompt contract | Launcher de Claude/Gemini/Codex con confirmación |
 | Memoria local | Diseñada | SQLite para eventos, permisos y auditoría |
 | Seguridad | Primitivas | Permission store, audit log y kill switch |
+| Smoke test | Simulación local y checklist real | Prueba E2E con servicios reales |
 
 ## Bloques prioritarios
 
@@ -92,7 +93,10 @@ Este documento resume qué ya existe como scaffold y qué falta para que Eclipse
 - Listar/limpiar memoria local: hecho.
 - Reply draft web con agent-browser, confirmación, texto desde `--message`/`--audio-path` y selector automático desde snapshot JSON: hecho.
 - Servicio systemd de usuario para listener: hecho.
-- Falta grabación directa desde reply workflow, ajustar selector con snapshots reales y adapters nativos app por app.
+- Grabación directa desde reply workflow: hecho.
+- Marcado manual `replied`/`dismissed`: hecho.
+- Smoke plan/simulación local: hecho.
+- Falta ajustar selector con snapshots reales y adapters nativos app por app.
 
 ## Regla de seguridad
 

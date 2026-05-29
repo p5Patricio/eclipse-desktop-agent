@@ -27,8 +27,10 @@ Primer work unit implementado en `src/eclipse_agent/notifications.py`:
 | 8. Daemon D-Bus inicial | Hecho: `notifications-listen` conecta `dbus-monitor` con `NotificationCenter`. |
 | 9. Intents de voz | Hecho: parser determinístico para “modo juego”, “no me avises...” y “dime qué llegó”. |
 | 10. Memoria revisable/borrable | Hecho: `notifications-list` y `notifications-clear --confirmed`. |
-| 11. Respuesta en borrador | Hecho: `notifications-reply-draft` acepta `--message` o `--audio-path`, abre/snapshotea web app, puede autoseleccionar un input desde snapshot JSON y rellena un ref confirmado sin enviar. |
+| 11. Respuesta en borrador | Hecho: `notifications-reply-draft` acepta `--message`, `--audio-path` o `--record-seconds`, abre/snapshotea web app, puede autoseleccionar un input desde snapshot JSON y rellena un ref confirmado sin enviar. |
 | 12. Servicio de usuario | Hecho: `notifications-service` renderiza/instala/activa un unit systemd user para el listener. |
+| 13. Estado post-respuesta | Hecho: `notifications-mark --status replied --confirmed`. |
+| 14. Smoke test | Hecho: `smoke-plan` y `smoke-simulate` para ensayo local/controlado. |
 
 Falta agregar selector automático de refs para inputs de mensaje y completar
 adapters nativos app por app.
@@ -132,6 +134,10 @@ PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
   --audio-path /tmp/eclipse-reply.wav
 PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
   --event-id EVENT_ID \
+  --record-seconds 4 \
+  --record-audio-path /tmp/eclipse-reply.wav
+PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
+  --event-id EVENT_ID \
   --message "Ahorita entro" \
   --selector @e7 \
   --confirmed
@@ -141,6 +147,16 @@ PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
   --snapshot-json /tmp/instagram-snapshot.json \
   --auto-select \
   --confirmed
+
+# Marcar que la notificación ya fue respondida.
+PYTHONPATH=src python -m eclipse_agent notifications-mark \
+  --event-id EVENT_ID \
+  --status replied \
+  --confirmed
+
+# Checklist y simulación local antes de prueba real.
+PYTHONPATH=src python -m eclipse_agent smoke-plan
+PYTHONPATH=src python -m eclipse_agent smoke-simulate
 ```
 
 `notifications-ingest` guarda el evento localmente. Si la decisión es anunciar, prepara el
@@ -267,8 +283,8 @@ Eclipse Brain opcional
 
 ## Siguiente implementación recomendada
 
-1. Marcar eventos como `replied` cuando el usuario confirme que el mensaje se envió.
-2. Grabar audio directo desde el reply workflow, no solo transcribir `--audio-path`.
-3. Probar selector automático con snapshots reales de Instagram/Messenger/Gmail
+1. Probar selector automático con snapshots reales de Instagram/Messenger/Gmail
    y ajustar heurísticas por sitio.
-4. Control nativo con D-Bus/AT-SPI cuando una app no sea web.
+2. Ejecutar `notifications-service --action install --execute` y
+   `enable-now --execute` en la sesión real del usuario.
+3. Control nativo con D-Bus/AT-SPI cuando una app no sea web.

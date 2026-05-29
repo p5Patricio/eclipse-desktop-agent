@@ -7,6 +7,7 @@ from eclipse_agent.notification_replies import (
 )
 from eclipse_agent.notifications import NotificationStore, create_notification_event
 from eclipse_agent.voice import TranscriptionResult
+from eclipse_agent.voice import ListenResult, RecordingResult
 
 
 def _stored_instagram_event(store: NotificationStore) -> str:
@@ -175,3 +176,45 @@ def test_resolve_reply_text_uses_transcribed_audio(tmp_path):
 
     assert result.success is True
     assert result.text == "Ahorita entro"
+
+
+def test_resolve_reply_text_records_and_transcribes_audio(tmp_path):
+    audio_path = tmp_path / "reply.wav"
+
+    class FakeListener:
+        def run(self, *, seconds=5, audio_path=None, dry_run=True):
+            return ListenResult(
+                success=True,
+                recording=RecordingResult(
+                    success=True,
+                    command=("fake-record",),
+                    audio_path=audio_path,
+                    message="recorded",
+                    dry_run=False,
+                    executed=True,
+                ),
+                transcription=TranscriptionResult(
+                    success=True,
+                    text=" Voy en camino ",
+                    audio_path=audio_path,
+                    provider="fake",
+                    message="ok",
+                ),
+                message="ok",
+            )
+
+    result = resolve_reply_text(
+        record_seconds=2,
+        record_audio_path=audio_path,
+        listener=FakeListener(),
+    )
+
+    assert result.success is True
+    assert result.text == "Voy en camino"
+
+
+def test_resolve_reply_text_rejects_invalid_record_duration():
+    result = resolve_reply_text(record_seconds=0)
+
+    assert result.success is False
+    assert "positive" in result.message

@@ -143,6 +143,18 @@ def test_store_delete_events_by_status(tmp_path):
     assert tuple(event.display_source for event in store.list_events()) == ("Messenger",)
 
 
+def test_store_update_event_status_marks_replied(tmp_path):
+    store = NotificationStore(tmp_path / "notifications.sqlite3")
+    event = create_notification_event(app_name="Messenger", summary="Nuevo mensaje")
+    store.save_event(event)
+
+    updated = store.update_event_status(event.id, NotificationStatus.REPLIED)
+
+    assert updated is not None
+    assert updated.status is NotificationStatus.REPLIED
+    assert store.list_pending() == ()
+
+
 def test_temporary_focus_mode_expires_back_to_normal(tmp_path):
     store = NotificationStore(tmp_path / "notifications.sqlite3")
     now = datetime(2026, 5, 28, 12, 0, tzinfo=UTC)

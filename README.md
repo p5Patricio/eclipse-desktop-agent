@@ -80,6 +80,8 @@ Proyecto entrando a fase **1: daemon always-on + voz mínima**.
 ```bash
 PYTHONPATH=src python -m eclipse_agent status
 PYTHONPATH=src python -m eclipse_agent diagnostics
+PYTHONPATH=src python -m eclipse_agent smoke-plan
+PYTHONPATH=src python -m eclipse_agent smoke-simulate
 PYTHONPATH=src python -m eclipse_agent say --text "Hola, soy Eclipse."
 PYTHONPATH=src venv/bin/python -m eclipse_agent listen --seconds 3
 PYTHONPATH=src python -m eclipse_agent resource-plan
@@ -118,12 +120,20 @@ PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
   --audio-path /tmp/eclipse-reply.wav
 PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
   --event-id EVENT_ID \
+  --record-seconds 4 \
+  --record-audio-path /tmp/eclipse-reply.wav
+PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
+  --event-id EVENT_ID \
   --message "Ahorita entro" \
   --snapshot-json /tmp/instagram-snapshot.json \
   --auto-select \
   --confirmed
 PYTHONPATH=src python -m eclipse_agent notifications-service --action render
 PYTHONPATH=src python -m eclipse_agent notifications-service --action install
+PYTHONPATH=src python -m eclipse_agent notifications-mark \
+  --event-id EVENT_ID \
+  --status replied \
+  --confirmed
 ```
 
 ## Licencia

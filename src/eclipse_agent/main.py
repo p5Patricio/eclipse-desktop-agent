@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import tempfile
 from pathlib import Path
 
 from eclipse_agent import __version__
 from eclipse_agent.activation import ActivationMode, build_activation_policy
+from eclipse_agent.agent_smoke import (
+    build_agent_smoke_plan,
+    render_agent_smoke_plan,
+    render_agent_smoke_simulation,
+    run_agent_smoke_simulation,
+)
 from eclipse_agent.browser_automation import (
     BrowserCommandKind,
     BrowserInteractionLoop,
@@ -83,6 +90,21 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("status", help="Show the planned runtime policy.")
     subparsers.add_parser("resource-plan", help="Show planning-level resource estimates.")
     subparsers.add_parser("diagnostics", help="Show local runtime capability status.")
+
+    smoke_plan = subparsers.add_parser(
+        "smoke-plan",
+        help="Show the manual checklist to test Eclipse as an agent.",
+    )
+    smoke_plan.add_argument("--store", help="Optional notification store path for commands.")
+
+    smoke_simulate = subparsers.add_parser(
+        "smoke-simulate",
+        help="Run a dependency-free simulated notification/reply smoke flow.",
+    )
+    smoke_simulate.add_argument(
+        "--store",
+        help="SQLite store path. Defaults to a temp smoke database.",
+    )
 
     say = subparsers.add_parser("say", help="Speak text using local TTS.")
     say.add_argument("--text", required=True, help="Text Eclipse should speak.")
@@ -246,6 +268,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Required to delete notification memory.",
     )
 
+    notifications_mark = subparsers.add_parser(
+        "notifications-mark",
+        help="Mark one notification with a new lifecycle status.",
+    )
+    _add_notification_store_arg(notifications_mark)
+    notifications_mark.add_argument("--event-id", required=True, help="Notification id.")
+    notifications_mark.add_argument(
+        "--status",
+        required=True,
+        choices=[status.value for status in NotificationStatus],
+        help="New notification status.",
+    )
+    notifications_mark.add_argument(
+        "--confirmed",
+        action="store_true",
+        help="Required for replied/dismissed status changes.",
+    )
+
     subparsers.add_parser(
         "notifications-dbus-command",
         help="Show the first D-Bus monitor command for native/web notifications.",
@@ -298,6 +338,15 @@ def build_parser() -> argparse.ArgumentParser:
     notifications_reply.add_argument(
         "--audio-path",
         help="Optional local audio file to transcribe as reply text.",
+    )
+    notifications_reply.add_argument(
+        "--record-seconds",
+        type=int,
+        help="Record microphone audio and transcribe it as reply text.",
+    )
+    notifications_reply.add_argument(
+        "--record-audio-path",
+        help="Optional WAV path for --record-seconds.",
     )
     notifications_reply.add_argument("--model", default="small", help="faster-whisper model.")
     notifications_reply.add_argument("--language", default="es", help="STT language code.")
@@ -498,6 +547,16 @@ def main(argv: list[str] | None = None) -> int:
         print(collect_runtime_diagnostics().render())
         return 0
 
+    if args.command == "smoke-plan":
+        print(render_agent_smoke_plan(build_agent_smoke_plan(store_path=args.store)))
+        return 0
+
+    if args.command == "smoke-simulate":
+        store = args.store or str(Path(tempfile.gettempdir()) / "eclipse-smoke.sqlite3")
+        result = run_agent_smoke_simulation(store_path=store)
+        print(render_agent_smoke_simulation(result))
+        return 0 if result.success else 1
+
     if args.command == "say":
         print(render_speech_result(SystemTTS().speak(args.text, dry_run=not args.execute)))
         return 0
@@ -619,6 +678,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Deleted {deleted} notification event(s).")
         return 0
 
+    if args.command == "notifications-mark":
+        new_status = NotificationStatus(args.status)
+        if new_status in {NotificationStatus.REPLIED, NotificationStatus.DISMISSED}:
+            if not args.confirmed:
+                print(f"Blocked: marking as {new_status.value} requires --confirmed.")
+                return 1
+        store = _notification_store(args)
+        event = store.update_event_status(args.event_id, new_status)
+        if event is None:
+            print(f"Notification not found: {args.event_id}")
+            return 1
+        print(f"Marked {event.id} as {event.status.value}.")
+        return 0
+
     if args.command == "notifications-dbus-command":
         print(DBusNotificationListenerPlan().render())
         return 0
@@ -649,7 +722,12 @@ def main(argv: list[str] | None = None) -> int:
         text_result = resolve_reply_text(
             message=args.message,
             audio_path=args.audio_path,
+            record_seconds=args.record_seconds,
+            record_audio_path=args.record_audio_path,
             transcriber=LocalWhisperSTT(model_name=args.model, language=args.language),
+            listener=ListenOnce(
+                stt=LocalWhisperSTT(model_name=args.model, language=args.language),
+            ),
         )
         if not text_result.success:
             print(f"Notification reply draft [blocked]: {text_result.message}")

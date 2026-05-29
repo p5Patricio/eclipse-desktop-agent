@@ -158,10 +158,15 @@ Estado del primer work unit:
 - `notifications-intent` cubre frases como “modo juego”, “no me avises...”
   y “dime qué llegó”.
 - `notifications-reply-draft` prepara respuestas web en borrador sin enviar y puede
-  usar `--message` o transcribir `--audio-path`.
+  usar `--message`, transcribir `--audio-path` o grabar con `--record-seconds`.
 - El reply workflow puede autoseleccionar un input desde un snapshot JSON con
   heurísticas conservadoras.
-- Falta validar heurísticas con snapshots reales y completar adapters nativos app por app.
+- `notifications-mark --status replied --confirmed` permite cerrar el ciclo
+  después de una respuesta confirmada.
+- `smoke-plan` y `smoke-simulate` documentan/validan el flujo mínimo antes de la
+  prueba real.
+- Falta validar heurísticas con snapshots reales, activar servicio real y
+  completar adapters nativos app por app.
 
 ## Fase 4.5 — Bridge de agentes de codificación
 

@@ -30,6 +30,7 @@ from eclipse_agent.notifications import (
     NotificationStore,
 )
 from eclipse_agent.voice import LocalWhisperSTT, TranscriptionResult
+from eclipse_agent.voice import ListenOnce, ListenResult
 
 
 WEB_REPLY_TARGETS = {
@@ -67,6 +68,19 @@ class ReplyTranscriber(Protocol):
 
     def transcribe_file(self, audio_path: str | Path) -> TranscriptionResult:
         """Transcribe a local audio file."""
+
+
+class ReplyListener(Protocol):
+    """Protocol for one-shot record/transcribe reply input."""
+
+    def run(
+        self,
+        *,
+        seconds: int = 5,
+        audio_path: str | Path | None = None,
+        dry_run: bool = True,
+    ) -> ListenResult:
+        """Record and transcribe one reply clip."""
 
 
 class NotificationReplyWorkflow:
@@ -182,9 +196,12 @@ def resolve_reply_text(
     *,
     message: str | None = None,
     audio_path: str | Path | None = None,
+    record_seconds: int | None = None,
+    record_audio_path: str | Path | None = None,
     transcriber: ReplyTranscriber | None = None,
+    listener: ReplyListener | None = None,
 ) -> NotificationReplyTextResult:
-    """Resolve reply text from explicit text or a local STT audio file."""
+    """Resolve reply text from explicit text, a file, or one-shot recording."""
 
     normalized_message = _normalize_optional_message(message)
     if normalized_message:
@@ -195,10 +212,19 @@ def resolve_reply_text(
         )
 
     if audio_path is None:
+        if record_seconds is not None:
+            return _resolve_recorded_reply_text(
+                seconds=record_seconds,
+                audio_path=record_audio_path,
+                listener=listener,
+            )
         return NotificationReplyTextResult(
             success=False,
             text="",
-            message="Reply text is required unless --audio-path is provided.",
+            message=(
+                "Reply text is required unless --audio-path or "
+                "--record-seconds is provided."
+            ),
         )
 
     stt = transcriber or LocalWhisperSTT()
@@ -215,6 +241,43 @@ def resolve_reply_text(
         text=" ".join(transcription.text.strip().split()),
         message="Using local STT transcription as reply text.",
         transcription=transcription,
+    )
+
+
+def _resolve_recorded_reply_text(
+    *,
+    seconds: int,
+    audio_path: str | Path | None,
+    listener: ReplyListener | None,
+) -> NotificationReplyTextResult:
+    if seconds <= 0:
+        return NotificationReplyTextResult(
+            success=False,
+            text="",
+            message="Recording duration must be positive.",
+        )
+
+    listen = listener or ListenOnce()
+    result = listen.run(seconds=seconds, audio_path=audio_path, dry_run=False)
+    if not result.success:
+        return NotificationReplyTextResult(
+            success=False,
+            text="",
+            message=result.message,
+            transcription=result.transcription,
+        )
+    if not result.transcription or not result.transcription.text.strip():
+        return NotificationReplyTextResult(
+            success=False,
+            text="",
+            message="Recorded reply did not produce transcription text.",
+            transcription=result.transcription,
+        )
+    return NotificationReplyTextResult(
+        success=True,
+        text=" ".join(result.transcription.text.strip().split()),
+        message="Using one-shot microphone transcription as reply text.",
+        transcription=result.transcription,
     )
 
 
