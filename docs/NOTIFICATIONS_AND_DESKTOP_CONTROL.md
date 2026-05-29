@@ -11,6 +11,40 @@ Eclipse correrá como daemon local always-on. Ese daemon puede escuchar notifica
 3. Guardar eventos permitidos en SQLite local.
 4. Responder desde navegador/apps con herramientas seguras y confirmación.
 
+## Estado actual
+
+Primer work unit implementado en `src/eclipse_agent/notifications.py`:
+
+| Bloque | Estado |
+|---|---|
+| 1. Modelo `NotificationEvent` | Hecho: evento normalizado con fuente web/nativa, urgencia, privacidad y estado. |
+| 2. Normalizador web/nativo | Hecho: Chrome/Firefox/etc. pueden mapearse a Instagram, Messenger, Gmail, YouTube, etc. |
+| 3. Reglas por app/fuente | Hecho: `NotificationRule` soporta `announce`, `queue`, `ignore` y `metadata_only`. |
+| 4. Modos normal/foco/juego/privado | Hecho: `game` y `focus` encolan; `private` guarda solo metadatos. |
+| 5. SQLite local | Hecho: eventos, reglas y modo actual se guardan localmente. |
+| 6. Anunciador TTS | Hecho: integra `SystemTTS`; la CLI prepara voz por defecto y habla con `--speak`. |
+| 7. Resumen de pendientes + D-Bus scaffold | Hecho: digest de cola, marcado como anunciado, parser de bloques `Notify` y comando inicial `dbus-monitor`. |
+| 8. Daemon D-Bus inicial | Hecho: `notifications-listen` conecta `dbus-monitor` con `NotificationCenter`. |
+| 9. Intents de voz | Hecho: parser determinístico para “modo juego”, “no me avises...” y “dime qué llegó”. |
+| 10. Memoria revisable/borrable | Hecho: `notifications-list` y `notifications-clear --confirmed`. |
+| 11. Respuesta en borrador | Hecho: `notifications-reply-draft` abre/snapshotea web app o rellena un ref confirmado sin enviar. |
+
+Falta endurecer el daemon como servicio de usuario, agregar selector automático
+de refs para inputs de mensaje y completar adapters nativos app por app.
+
+## Decisión SQLite vs DuckDB
+
+Para el store operacional de notificaciones mantenemos **SQLite**.
+
+DuckDB es una excelente opción Python para consultas analíticas/OLAP, pero el
+workload de Eclipse aquí es más transaccional: insertar notificaciones pequeñas,
+actualizar estados, leer una cola y borrar memoria local. SQLite viene con
+Python, no agrega dependencia y encaja mejor para esta ruta caliente del daemon.
+
+DuckDB queda como opción complementaria futura para analytics/export de historial,
+por ejemplo resúmenes semanales o consultas sobre Parquet. La decisión está en
+[`docs/adr/0003-notification-storage-sqlite.md`](adr/0003-notification-storage-sqlite.md).
+
 ## Flujo esperado: jugando Rocket League
 
 ```txt
@@ -39,6 +73,61 @@ Eclipse correrá como daemon local always-on. Ese daemon puede escuchar notifica
 | “Eclipse, dime qué llegó” | Resume notificaciones pendientes. |
 | “Eclipse, responde al grupo de Instagram que ahorita entro” | Prepara borrador y pide confirmación. |
 | “Eclipse, vuelve a avisarme normal” | Desactiva modo foco/silencio. |
+
+## CLI de desarrollo
+
+```bash
+# No molestar mientras juego una hora.
+PYTHONPATH=src python -m eclipse_agent notifications-mode --mode game --minutes 60
+
+# Silenciar Instagram y Messenger: se guardan para resumen posterior.
+PYTHONPATH=src python -m eclipse_agent notifications-mute --app Instagram --app Messenger
+
+# Simular una notificación web de Instagram emitida por Chrome.
+PYTHONPATH=src python -m eclipse_agent notifications-ingest \
+  --app "Google Chrome" \
+  --summary "Instagram" \
+  --body "Nuevo mensaje de Ana" \
+  --source-window "Instagram - Google Chrome"
+
+# Al terminar: leer resumen de lo que llegó y marcarlo como anunciado.
+PYTHONPATH=src python -m eclipse_agent notifications-summary --mark-announced
+
+# Ver el comando base para capturar Notify en Fedora/KDE.
+PYTHONPATH=src python -m eclipse_agent notifications-dbus-command
+
+# Preparar o ejecutar el listener D-Bus real durante 30 segundos.
+PYTHONPATH=src python -m eclipse_agent notifications-listen --seconds 30
+PYTHONPATH=src python -m eclipse_agent notifications-listen --seconds 30 --execute
+
+# Ejecutar comandos como si vinieran de voz/STT.
+PYTHONPATH=src python -m eclipse_agent notifications-intent \
+  --text "Eclipse, modo juego por una hora"
+PYTHONPATH=src python -m eclipse_agent notifications-intent \
+  --text "No me avises de Instagram ni Messenger"
+PYTHONPATH=src python -m eclipse_agent notifications-intent \
+  --text "Dime qué llegó" \
+  --mark-announced
+
+# Revisar o borrar memoria local de notificaciones.
+PYTHONPATH=src python -m eclipse_agent notifications-list --status queued
+PYTHONPATH=src python -m eclipse_agent notifications-clear \
+  --status announced \
+  --confirmed
+
+# Preparar una respuesta segura en navegador: primero snapshot, luego fill confirmado.
+PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
+  --event-id EVENT_ID \
+  --message "Ahorita entro"
+PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
+  --event-id EVENT_ID \
+  --message "Ahorita entro" \
+  --selector @e7 \
+  --confirmed
+```
+
+`notifications-ingest` guarda el evento localmente. Si la decisión es anunciar, prepara el
+comando TTS en dry-run; para hablar de verdad se usa `--speak`.
 
 ## Arquitectura de notificaciones
 
@@ -161,9 +250,8 @@ Eclipse Brain opcional
 
 ## Siguiente implementación recomendada
 
-1. `NotificationListener` con D-Bus.
-2. `NotificationStore` SQLite.
-3. `NotificationRules` para silenciar apps.
-4. `SystemTTS` para anunciar eventos.
-5. `LocalWhisperSTT` para responder con dictado.
-6. Integración `agent-browser` para preparar respuestas web.
+1. Convertir `notifications-listen` en servicio systemd de usuario.
+2. Marcar eventos como `replied` cuando el usuario confirme que el mensaje se envió.
+3. Respuesta dictada con `LocalWhisperSTT` integrada directo al reply workflow.
+4. Selector automático de refs para inputs de Instagram/Messenger.
+5. Control nativo con D-Bus/AT-SPI cuando una app no sea web.

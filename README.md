@@ -59,6 +59,7 @@ src/eclipse_agent/          Núcleo Python inicial
   desktop_apps.py           Descubrimiento y lanzamiento seguro de apps .desktop
   fedora_control.py         Scaffold de control nativo Fedora/KDE
   main.py                   CLI placeholder para validar el paquete
+  notifications.py          Core de notificaciones, reglas foco/juego y SQLite
   planner.py                Descomposición de instrucciones multi-acción
   resources.py              Estimaciones de recursos por modo de activación
   runtime_diagnostics.py    Diagnósticos de dependencias locales
@@ -97,6 +98,21 @@ PYTHONPATH=src python -m eclipse_agent coding-prompt \
   --agent "Claude Code" \
   --project /ruta/al/proyecto \
   --idea "Implementa esta idea..."
+PYTHONPATH=src python -m eclipse_agent notifications-mode --mode game --minutes 60
+PYTHONPATH=src python -m eclipse_agent notifications-mute --app Instagram --app Messenger
+PYTHONPATH=src python -m eclipse_agent notifications-ingest \
+  --app "Google Chrome" \
+  --summary "Instagram" \
+  --body "Nuevo mensaje" \
+  --source-window "Instagram - Google Chrome"
+PYTHONPATH=src python -m eclipse_agent notifications-summary --mark-announced
+PYTHONPATH=src python -m eclipse_agent notifications-dbus-command
+PYTHONPATH=src python -m eclipse_agent notifications-listen --seconds 30
+PYTHONPATH=src python -m eclipse_agent notifications-intent \
+  --text "Eclipse, modo juego por una hora"
+PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
+  --event-id EVENT_ID \
+  --message "Ahorita entro"
 ```
 
 ## Licencia

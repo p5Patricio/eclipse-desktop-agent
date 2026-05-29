@@ -15,7 +15,7 @@ Este documento resume qué ya existe como scaffold y qué falta para que Eclipse
 | Browser interaction loop | Snapshot JSON parseado | Elegir refs semánticas automáticamente |
 | YouTube Music | Launcher detectado | Buscar canción y reproducir resultado correcto |
 | Instagram/Messenger | URLs preparadas | Preparar respuestas sin enviar, con confirmación |
-| Notificaciones | Diseñado | D-Bus listener + SQLite store + reglas |
+| Notificaciones | Core SQLite/reglas/daemon/intents implementado | Servicio user-level + selector automático de reply refs |
 | Agentes de codificación | Prompt contract | Launcher de Claude/Gemini/Codex con confirmación |
 | Memoria local | Diseñada | SQLite para eventos, permisos y auditoría |
 | Seguridad | Primitivas | Permission store, audit log y kill switch |
@@ -77,6 +77,21 @@ Este documento resume qué ya existe como scaffold y qué falta para que Eclipse
 - STT tras wake word.
 - TTS de respuesta.
 - Indicador de micrófono y kill switch.
+
+### 8. Notificaciones, foco y resumen
+
+- Modelo `NotificationEvent`: hecho.
+- Normalización web/nativa: hecho.
+- Reglas de app/fuente (`announce`, `queue`, `ignore`, `metadata_only`): hecho.
+- Modos `normal`, `focus`, `game`, `private`: hecho.
+- SQLite local para eventos/reglas/modo: hecho.
+- TTS para anuncios: hecho en scaffold.
+- Resumen de cola, marcado como anunciado, parser de `Notify` y comando D-Bus inicial: hecho.
+- Listener D-Bus ejecutable con `notifications-listen`: hecho.
+- Intents de voz para modo juego, silenciar y resumen: hecho.
+- Listar/limpiar memoria local: hecho.
+- Reply draft web con agent-browser y confirmación: hecho.
+- Falta servicio systemd de usuario, selector automático de refs y adapters nativos app por app.
 
 ## Regla de seguridad
 

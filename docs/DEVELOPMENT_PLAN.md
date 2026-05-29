@@ -139,13 +139,25 @@ Componentes:
 
 Criterios de aceptación:
 
-- [ ] Detecta notificaciones permitidas.
-- [ ] “No me avises de Instagram ni Messenger” silencia esas apps.
-- [ ] “Modo juego” guarda eventos sin hablar salvo allowlist/urgente.
-- [ ] “Dime qué llegó” resume la cola de notificaciones.
-- [ ] Ignora apps bloqueadas.
-- [ ] Guarda solo metadatos necesarios cuando esté en modo privado.
-- [ ] Permite borrar memoria local.
+- [x] Detecta notificaciones permitidas desde bloques `Notify` de D-Bus.
+- [x] “No me avises de Instagram ni Messenger” silencia esas apps en reglas persistidas.
+- [x] “Modo juego” guarda eventos sin hablar.
+- [x] “Dime qué llegó” resume la cola de notificaciones.
+- [x] Ignora apps bloqueadas mediante reglas `ignore`.
+- [x] Guarda solo metadatos necesarios cuando esté en modo privado.
+- [x] Permite borrar memoria local con confirmación.
+
+Estado del primer work unit:
+
+- `NotificationStore` SQLite guarda eventos, reglas y modo actual.
+- `NotificationCenter` decide si anuncia o encola.
+- `notifications-mode`, `notifications-mute`, `notifications-ingest`,
+  `notifications-summary` y `notifications-dbus-command` permiten validar el flujo.
+- `notifications-listen` ejecuta el primer listener D-Bus con `dbus-monitor`.
+- `notifications-intent` cubre frases como “modo juego”, “no me avises...”
+  y “dime qué llegó”.
+- `notifications-reply-draft` prepara respuestas web en borrador sin enviar.
+- Falta empaquetarlo como servicio de usuario y automatizar selección de refs.
 
 ## Fase 4.5 — Bridge de agentes de codificación
 
