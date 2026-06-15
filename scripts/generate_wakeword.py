@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -39,12 +40,27 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORK_DIR = PROJECT_ROOT / ".wakeword-training" / DEFAULT_MODEL_NAME
 DEFAULT_OUTPUT_MODEL = PROJECT_ROOT / "models" / f"{DEFAULT_MODEL_NAME}.onnx"
 DEFAULT_PIPER_SAMPLE_GENERATOR_PATH = PROJECT_ROOT / "piper-sample-generator"
+DEFAULT_PIPER_GENERATOR_MODEL = (
+    DEFAULT_PIPER_SAMPLE_GENERATOR_PATH / "models" / "en-us-libritts-high.pt"
+)
 DEFAULT_BACKGROUND_PATH = DEFAULT_WORK_DIR / "background_clips"
 DEFAULT_RIR_PATH = DEFAULT_WORK_DIR / "mit_rirs"
 DEFAULT_FALSE_POSITIVE_VALIDATION_DATA = DEFAULT_WORK_DIR / "validation_set_features.npy"
 DEFAULT_FEATURE_DATA_FILE = (
     "ACAV100M_sample="
     f"{DEFAULT_WORK_DIR / 'openwakeword_features_ACAV100M_2000_hrs_16bit.npy'}"
+)
+DEFAULT_CUSTOM_NEGATIVE_PHRASES = (
+    "computer",
+    "calendar",
+    "message",
+    "settings",
+    "window",
+    "music",
+    "weather",
+    "notebook",
+    "system",
+    "sunlight",
 )
 
 REQUIRED_TRAINING_MODULES = (
@@ -55,6 +71,14 @@ REQUIRED_TRAINING_MODULES = (
     "scipy",
     "yaml",
     "tqdm",
+    "pronouncing",
+    "audiomentations",
+    "torch_audiomentations",
+    "speechbrain",
+    "torchaudio",
+    "mutagen",
+    "acoustics",
+    "piper_sample_generator",
 )
 
 
@@ -66,6 +90,18 @@ class TrainingCommand:
     config_path: Path
     generated_model_path: Path
     output_model_path: Path
+    environment: dict[str, str]
+
+
+@dataclass(frozen=True)
+class WakewordEvaluationResult:
+    """Evaluation gate result for a candidate custom wake-word model."""
+
+    acceptable: bool
+    positive_detection_rate: float
+    false_activation_rate: float
+    message: str
+    recommended_configuration: str = ""
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -82,8 +118,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         validate_training_environment(args)
-        completed = subprocess.run(command.command, check=False)  # noqa: S603
+        completed = subprocess.run(command.command, check=False, env=command.environment)  # noqa: S603
         if completed.returncode != 0:
+            if command.generated_model_path.exists():
+                copy_model_artifacts(command.generated_model_path, command.output_model_path)
+                print(
+                    "openwakeword training returned a non-zero exit code after "
+                    "exporting the ONNX model. The optional TFLite conversion can "
+                    "fail when onnx-tf is not installed, but Eclipse only needs the "
+                    f"ONNX artifact. Copied model to: {command.output_model_path}",
+                    file=sys.stderr,
+                )
+                return 0
             print(
                 f"openwakeword training failed with exit code {completed.returncode}.",
                 file=sys.stderr,
@@ -99,8 +145,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        command.output_model_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(command.generated_model_path, command.output_model_path)
+        copy_model_artifacts(command.generated_model_path, command.output_model_path)
         print(f"Eclipse wake-word model ready: {command.output_model_path}")
         return 0
     except ValueError as exc:
@@ -109,6 +154,72 @@ def main(argv: Sequence[str] | None = None) -> int:
     except RuntimeError as exc:
         print(f"Environment error: {exc}", file=sys.stderr)
         return 3
+
+
+def build_workflow_guide() -> str:
+    """Return the operator workflow for safe Eclipse wake-word customization."""
+
+    return "\n".join(
+        [
+            "Eclipse wakeword customization workflow:",
+            "1. Capture positive wakeword examples: record several clean clips saying 'eclipse'.",
+            "2. Capture or provide negative/background examples: room noise, speech without the wakeword, and common near-miss phrases.",
+            f"3. Train into the work directory: {DEFAULT_WORK_DIR.relative_to(PROJECT_ROOT)}.",
+            f"4. Export the candidate model artifact: {DEFAULT_OUTPUT_MODEL.relative_to(PROJECT_ROOT)}.",
+            "5. Evaluate positive detection and false activation rates before promotion.",
+            "6. If evaluation fails, keep builtin hey_jarvis as the default fallback.",
+        ]
+    )
+
+
+def evaluate_wakeword_scores(
+    *,
+    positive_scores: Sequence[float],
+    negative_scores: Sequence[float],
+    positive_threshold: float,
+    minimum_positive_detection_rate: float,
+    maximum_false_activation_rate: float,
+    model_path: Path = DEFAULT_OUTPUT_MODEL,
+) -> WakewordEvaluationResult:
+    """Evaluate a custom wake-word model without requiring live audio in tests."""
+
+    if not positive_scores:
+        raise ValueError("At least one positive wakeword score is required.")
+    if not negative_scores:
+        raise ValueError("At least one negative/background score is required.")
+    if not 0 <= positive_threshold <= 1:
+        raise ValueError("Positive threshold must be between 0 and 1.")
+    if not 0 <= minimum_positive_detection_rate <= 1:
+        raise ValueError("Minimum positive detection rate must be between 0 and 1.")
+    if not 0 <= maximum_false_activation_rate <= 1:
+        raise ValueError("Maximum false activation rate must be between 0 and 1.")
+
+    positive_detection_rate = _rate_at_or_above(positive_scores, positive_threshold)
+    false_activation_rate = _rate_at_or_above(negative_scores, positive_threshold)
+    acceptable = (
+        positive_detection_rate >= minimum_positive_detection_rate
+        and false_activation_rate <= maximum_false_activation_rate
+    )
+    if acceptable:
+        return WakewordEvaluationResult(
+            acceptable=True,
+            positive_detection_rate=positive_detection_rate,
+            false_activation_rate=false_activation_rate,
+            message=(
+                "Custom wake-word model is acceptable; use it with builtin "
+                "hey_jarvis fallback still enabled."
+            ),
+            recommended_configuration=f"ECLIPSE_WAKEWORD_MODEL_PATH={model_path}",
+        )
+    return WakewordEvaluationResult(
+        acceptable=False,
+        positive_detection_rate=positive_detection_rate,
+        false_activation_rate=false_activation_rate,
+        message=(
+            "Custom wake-word model did not pass evaluation; keep builtin hey_jarvis "
+            "as the default and do not promote this model automatically."
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -136,7 +247,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--piper-sample-generator-path",
         type=Path,
         default=DEFAULT_PIPER_SAMPLE_GENERATOR_PATH,
-        help="Path containing generate_samples.py from the Piper sample generator.",
+        help=(
+            "Path containing generate_samples.py or the modern "
+            "piper_sample_generator package checkout."
+        ),
+    )
+    parser.add_argument(
+        "--piper-generator-model",
+        type=Path,
+        default=DEFAULT_PIPER_GENERATOR_MODEL,
+        help="Piper LibriTTS generator .pt model used by the compatibility shim.",
     )
     parser.add_argument(
         "--background-path",
@@ -164,6 +284,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="NAME=PATH",
         help="Precomputed negative-feature .npy file. Can be repeated.",
+    )
+    parser.add_argument(
+        "--custom-negative-phrase",
+        action="append",
+        default=[],
+        help="Additional phrase to synthesize as an adversarial negative. Can be repeated.",
     )
     parser.add_argument("--n-samples", type=int, default=10000, help="Synthetic train samples.")
     parser.add_argument(
@@ -247,13 +373,15 @@ def prepare_training_command(args: argparse.Namespace) -> TrainingCommand:
         model_name=args.model_name,
         work_dir=work_dir,
         output_dir=output_dir,
-        piper_sample_generator_path=args.piper_sample_generator_path.expanduser().resolve(),
+        piper_sample_generator_path=prepare_piper_sample_generator_path(args, work_dir),
         background_paths=tuple(args.background_path) or (DEFAULT_BACKGROUND_PATH,),
         rir_paths=tuple(args.rir_path) or (DEFAULT_RIR_PATH,),
         false_positive_validation_data=args.false_positive_validation_data.expanduser().resolve(),
         feature_data_files=parse_feature_data_files(
             args.feature_data_file or [DEFAULT_FEATURE_DATA_FILE]
         ),
+        custom_negative_phrases=tuple(args.custom_negative_phrase)
+        or DEFAULT_CUSTOM_NEGATIVE_PHRASES,
         n_samples=args.n_samples,
         n_samples_val=args.n_samples_val,
         steps=args.steps,
@@ -284,6 +412,7 @@ def prepare_training_command(args: argparse.Namespace) -> TrainingCommand:
         config_path=config_path,
         generated_model_path=generated_model_path,
         output_model_path=output_model,
+        environment=build_training_environment(work_dir),
     )
 
 
@@ -298,6 +427,7 @@ def build_training_config(
     rir_paths: tuple[Path, ...],
     false_positive_validation_data: Path,
     feature_data_files: dict[str, Path],
+    custom_negative_phrases: tuple[str, ...],
     n_samples: int,
     n_samples_val: int,
     steps: int,
@@ -320,7 +450,7 @@ def build_training_config(
     return {
         "model_name": model_name,
         "target_phrase": [phrase],
-        "custom_negative_phrases": [],
+        "custom_negative_phrases": [normalize_phrase(phrase) for phrase in custom_negative_phrases],
         "n_samples": n_samples,
         "n_samples_val": n_samples_val,
         "tts_batch_size": tts_batch_size,
@@ -361,12 +491,27 @@ def validate_training_environment(args: argparse.Namespace) -> None:
             f"{', '.join(missing_modules)}. Install the wake-word training extra first."
         )
 
-    piper_path = args.piper_sample_generator_path.expanduser().resolve()
+    work_dir = args.work_dir.expanduser().resolve()
+    piper_path = prepare_piper_sample_generator_path(args, work_dir)
     if not (piper_path / "generate_samples.py").exists():
         raise RuntimeError(
             "Piper sample generator is missing. Expected generate_samples.py under "
             f"{piper_path}. Clone an openwakeword-compatible piper-sample-generator there "
             "or pass --piper-sample-generator-path."
+        )
+
+    piper_generator_model = args.piper_generator_model.expanduser().resolve()
+    if not piper_generator_model.is_file():
+        raise RuntimeError(
+            "Piper generator model is missing: "
+            f"{piper_generator_model}. Download en_US-libritts_r-medium.pt from "
+            "the piper-sample-generator release or pass --piper-generator-model."
+        )
+    if not Path(f"{piper_generator_model}.json").is_file():
+        raise RuntimeError(
+            "Piper generator model metadata is missing: "
+            f"{piper_generator_model}.json. The piper-sample-generator checkout "
+            "normally includes this JSON next to the model path."
         )
 
     background_paths = tuple(args.background_path) or (DEFAULT_BACKGROUND_PATH,)
@@ -417,6 +562,133 @@ def normalize_phrase(value: str) -> str:
     if not phrase:
         raise ValueError("Wake phrase cannot be empty.")
     return phrase
+
+
+def _rate_at_or_above(scores: Sequence[float], threshold: float) -> float:
+    return sum(1 for score in scores if float(score) >= threshold) / len(scores)
+
+
+def prepare_piper_sample_generator_path(args: argparse.Namespace, work_dir: Path) -> Path:
+    """Return an openwakeword-compatible Piper sample generator path.
+
+    openwakeword 0.6 imports ``generate_samples`` from a top-level
+    ``generate_samples.py`` file. Modern ``piper-sample-generator`` exposes the
+    same function from the ``piper_sample_generator`` package and requires the
+    generator model path as an explicit argument. To keep Eclipse setup
+    reproducible, this function creates a tiny compatibility shim in the
+    training work directory when the cloned repository uses the modern package
+    layout.
+    """
+
+    piper_path = args.piper_sample_generator_path.expanduser().resolve()
+    if (piper_path / "generate_samples.py").exists():
+        return piper_path
+
+    if not (piper_path / "piper_sample_generator" / "__main__.py").exists():
+        return piper_path
+
+    shim_dir = work_dir / "piper_sample_generator_shim"
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    generator_model = args.piper_generator_model.expanduser().resolve()
+    shim_path = shim_dir / "generate_samples.py"
+    shim_path.write_text(
+        "\n".join(
+            [
+                '"""Compatibility shim for openwakeword synthetic sample generation."""',
+                "",
+                "from __future__ import annotations",
+                "",
+                "import sys",
+                "from pathlib import Path",
+                "",
+                "import numpy as np",
+                "import soundfile as sf",
+                "from scipy.signal import resample_poly",
+                "",
+                f"sys.path.insert(0, {str(piper_path)!r})",
+                "",
+                "from piper_sample_generator.__main__ import generate_samples as _generate_samples",
+                "",
+                f'DEFAULT_MODEL = Path({str(generator_model)!r})',
+                "",
+                "def generate_samples(*args, **kwargs):",
+                '    """Generate samples using the configured Piper generator model."""',
+                "    kwargs.setdefault('model', DEFAULT_MODEL)",
+                "    output_dir = Path(kwargs.get('output_dir', args[1] if len(args) > 1 else '.'))",
+                "    result = _generate_samples(*args, **kwargs)",
+                "    _resample_output_wavs(output_dir)",
+                "    return result",
+                "",
+                "def _resample_output_wavs(output_dir: Path, target_sample_rate: int = 16000) -> None:",
+                "    for wav_path in output_dir.glob('*.wav'):",
+                "        audio, sample_rate = sf.read(wav_path, dtype='float32')",
+                "        if sample_rate == target_sample_rate:",
+                "            continue",
+                "        if audio.ndim > 1:",
+                "            audio = audio.mean(axis=1)",
+                "        gcd = np.gcd(sample_rate, target_sample_rate)",
+                "        resampled = resample_poly(audio, target_sample_rate // gcd, sample_rate // gcd)",
+                "        sf.write(wav_path, resampled, target_sample_rate, subtype='PCM_16')",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return shim_dir
+
+
+def build_training_environment(work_dir: Path) -> dict[str, str]:
+    """Build the environment used by the openwakeword training subprocess."""
+
+    patch_dir = work_dir / "python_runtime_patches"
+    patch_dir.mkdir(parents=True, exist_ok=True)
+    (patch_dir / "sitecustomize.py").write_text(
+        "\n".join(
+            [
+                '"""Runtime compatibility patches for Eclipse wake-word training."""',
+                "",
+                "from __future__ import annotations",
+                "",
+                "try:",
+                "    import soundfile as sf",
+                "    import torchaudio",
+                "",
+                "    if not hasattr(torchaudio, 'info'):",
+                "        class _AudioInfo:",
+                "            def __init__(self, info):",
+                "                self.num_frames = int(info.frames)",
+                "                self.sample_rate = int(info.samplerate)",
+                "",
+                "        def _info(path):",
+                "            return _AudioInfo(sf.info(path))",
+                "",
+                "        torchaudio.info = _info",
+                "except Exception:",
+                "    pass",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        str(patch_dir)
+        if not existing_pythonpath
+        else f"{patch_dir}{os.pathsep}{existing_pythonpath}"
+    )
+    return env
+
+
+def copy_model_artifacts(generated_model_path: Path, output_model_path: Path) -> None:
+    """Copy the ONNX model and any external-data sidecar emitted by PyTorch."""
+
+    output_model_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(generated_model_path, output_model_path)
+
+    generated_sidecar = Path(f"{generated_model_path}.data")
+    if generated_sidecar.exists():
+        shutil.copy2(generated_sidecar, Path(f"{output_model_path}.data"))
 
 
 def shlex_join(command: Sequence[str]) -> str:

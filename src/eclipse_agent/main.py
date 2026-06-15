@@ -259,6 +259,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Custom openwakeword model path for the Eclipse phrase. Can be repeated.",
     )
     wake_efficient.add_argument(
+        "--builtin-wakeword",
+        default="hey_jarvis",
+        help=(
+            "Built-in openwakeword fallback model. Set to an empty string only when "
+            "you intentionally want no builtin fallback."
+        ),
+    )
+    wake_efficient.add_argument(
         "--command-seconds",
         type=int,
         default=5,
@@ -875,6 +883,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             wake_trigger=OpenWakeWordTrigger(
                 model_paths=tuple(args.wakeword_model),
+                builtin_model=args.builtin_wakeword or None,
                 threshold=args.wake_threshold,
             ),
             store=_notification_store(args),

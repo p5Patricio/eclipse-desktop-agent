@@ -8,6 +8,7 @@ __pycache__/
 htmlcov/
 .venv/
 venv/
+.venv-wake/
 
 # Local secrets/config
 .env
@@ -23,7 +24,9 @@ logs/
 screenshots/
 audio/
 .wakeword-training/
+piper-sample-generator/
 models/*.onnx
+models/*.onnx.data
 !models/.gitkeep
 *.sqlite
 *.db
