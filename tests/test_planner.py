@@ -13,6 +13,7 @@ from eclipse_agent.planner import (
     build_vision_config_from_env,
     build_planner_config_from_env,
     create_action_plan,
+    create_local_fallback_action_plan,
 )
 from eclipse_agent.safety import RiskLevel
 from eclipse_agent.telemetry import ExecutionTelemetryStore, TelemetryLayer
@@ -119,6 +120,63 @@ def test_search_action_is_medium_risk_browser_work():
     assert "RTX 5090" in plan.actions[0].parameters["query"]
 
 
+def test_google_search_intent_extracts_spanish_query_for_native_tool():
+    plan = create_action_plan("Eclipse, busca en Google Fedora 44 y PipeWire")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.GOOGLE_SEARCH
+    assert action.tool_name == "native.google_search"
+    assert action.target == "Google"
+    assert action.parameters["query"] == "Fedora 44 y PipeWire"
+
+
+def test_google_search_without_query_is_unknown_clarification():
+    plan = create_local_fallback_action_plan("Eclipse, busca en Google")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.UNKNOWN
+    assert action.target == "unknown"
+    assert "clause" in action.parameters
+
+
+def test_desktop_app_launch_intent_extracts_english_allowlisted_target():
+    plan = create_action_plan("Eclipse, open terminal")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.OPEN_DESKTOP_APP
+    assert action.tool_name == "native.open_desktop_app"
+    assert action.target == "terminal"
+    assert action.parameters["app_name"] == "terminal"
+
+
+def test_desktop_app_launch_unsupported_target_stays_structured_for_router_rejection():
+    plan = create_action_plan("Eclipse, abre Slack")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.OPEN_DESKTOP_APP
+    assert action.tool_name == "native.open_desktop_app"
+    assert action.target == "slack"
+    assert action.parameters["app_name"] == "slack"
+
+
+
+def test_desktop_app_launch_ambiguous_english_targets_are_unknown():
+    plan = create_local_fallback_action_plan("Eclipse, open terminal or files")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.UNKNOWN
+    assert action.target == "unknown"
+    assert "terminal or files" in action.parameters["clause"]
+
+
+def test_desktop_app_launch_ambiguous_spanish_targets_are_unknown():
+    plan = create_local_fallback_action_plan("Eclipse, abre Slack o terminal")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.UNKNOWN
+    assert action.target == "unknown"
+    assert "Slack o terminal" in action.parameters["clause"]
+
 def test_screen_question_plans_screenshot_action():
     plan = create_action_plan("What is on my screen?")
 
@@ -206,7 +264,7 @@ def test_build_vision_config_defaults_to_ollama_qwen_vl(monkeypatch):
     config = build_vision_config_from_env()
 
     assert config.base_url == "http://localhost:11434/v1"
-    assert config.model == "qwen2-vl:7b"
+    assert config.model == "qwen2.5vl:7b"
     assert config.api_key == "ollama"
 
 
@@ -214,14 +272,14 @@ def test_vision_adapter_sends_openai_compatible_image_payload(tmp_path):
     image_path = tmp_path / "screen.jpg"
     image_path.write_bytes(b"\xff\xd8fake-jpeg\xff\xd9")
     client = FakeVisionClient()
-    adapter = VisionAdapter(VisionAdapterConfig(model="qwen2-vl:7b"), client=client)
+    adapter = VisionAdapter(VisionAdapterConfig(model="qwen2.5vl:7b"), client=client)
 
     result = adapter.analyze_image(image_path, prompt="Describe the screen.")
 
     assert result.success is True
     assert result.text == "The screenshot shows a terminal."
     call = client.chat.completions.calls[0]
-    assert call["model"] == "qwen2-vl:7b"
+    assert call["model"] == "qwen2.5vl:7b"
     content = call["messages"][0]["content"]
     assert content[0] == {"type": "text", "text": "Describe the screen."}
     assert content[1]["type"] == "image_url"
@@ -236,7 +294,7 @@ def test_vision_adapter_reports_missing_ollama_model(tmp_path):
     result = adapter.analyze_image(image_path, prompt="Describe the screen.")
 
     assert result.success is False
-    assert "ollama pull qwen2-vl:7b" in result.message
+    assert "ollama pull qwen2.5vl:7b" in result.message
 
 
 def _smart_browser_plan(instruction: str) -> ActionPlan:

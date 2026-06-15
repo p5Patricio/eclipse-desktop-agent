@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import quote_plus
 
 from eclipse_agent.planner import (
     ActionKind,
@@ -104,6 +108,192 @@ class VisionAdapterProtocol(Protocol):
 
     def analyze_image(self, image_path: str | Path, *, prompt: str) -> VisionAnalysisResult:
         """Analyze a screenshot path and return a vision result."""
+
+
+@dataclass(frozen=True)
+class NativeToolResult:
+    """Minimal result object returned by NativeMCPClient."""
+
+    isError: bool = False
+    _message: str = ""
+    structuredContent: dict[str, Any] | None = None
+
+    @property
+    def content(self) -> list[dict[str, str]]:
+        return [{"text": self._message}]
+
+
+_KNOWN_URLS: dict[str, str] = {
+    "youtube": "https://www.youtube.com/",
+    "youtube music": "https://music.youtube.com/",
+    "instagram": "https://www.instagram.com/",
+    "messenger": "https://www.messenger.com/",
+    "gmail": "https://mail.google.com/",
+    "github": "https://github.com/",
+    "google": "https://www.google.com/",
+}
+
+_DESKTOP_APP_ALLOWLIST: dict[str, tuple[str, ...]] = {
+    "browser": ("xdg-open", "https://www.google.com/"),
+    "terminal": ("xdg-open", "org.gnome.Terminal.desktop"),
+    "files": ("xdg-open", "org.gnome.Nautilus.desktop"),
+}
+
+
+class NativeMCPClient:
+    """Execute basic Eclipse actions natively without MCP servers.
+
+    Handles open_web_app via xdg-open, browser_search via a Google URL,
+    and screenshot via grim. Used as the default router backend for
+    WakeRuntime so spoken commands work out of the box.
+    """
+
+    def discover_tools(self) -> tuple[MCPToolDefinition, ...]:
+        return (
+            MCPToolDefinition(
+                name="xdg_open_url",
+                server_name="native",
+                description="Open a URL or web app in the default browser via xdg-open",
+                action_kinds=(ActionKind.OPEN_WEB_APP, ActionKind.BROWSER_SEARCH),
+                risk_level=RiskLevel.MEDIUM,
+            ),
+            MCPToolDefinition(
+                name="google_search",
+                server_name="native",
+                description="Open a Google search URL in the default browser via xdg-open",
+                action_kinds=(ActionKind.GOOGLE_SEARCH,),
+                risk_level=RiskLevel.MEDIUM,
+            ),
+            MCPToolDefinition(
+                name="open_desktop_app",
+                server_name="native",
+                description="Open an allowlisted desktop application",
+                action_kinds=(ActionKind.OPEN_DESKTOP_APP,),
+                risk_level=RiskLevel.LOW,
+            ),
+            MCPToolDefinition(
+                name="grim_screenshot",
+                server_name="native",
+                description="Capture a Wayland screenshot with grim",
+                action_kinds=(ActionKind.SCREENSHOT,),
+                risk_level=RiskLevel.LOW,
+            ),
+        )
+
+    def call_tool(self, tool: MCPToolDefinition, arguments: dict[str, Any]) -> NativeToolResult:
+        if tool.name == "xdg_open_url":
+            return self._open_url(arguments)
+        if tool.name == "google_search":
+            return self._google_search(arguments)
+        if tool.name == "open_desktop_app":
+            return self._open_desktop_app(arguments)
+        if tool.name == "grim_screenshot":
+            return self._capture_screenshot(arguments)
+        return NativeToolResult(isError=True, _message=f"Unknown native tool: {tool.name}")
+
+    def _open_url(self, arguments: dict[str, Any]) -> NativeToolResult:
+        url = str(arguments.get("url", "") or arguments.get("target", "")).strip()
+        if not url:
+            return NativeToolResult(isError=True, _message="No URL or target provided.")
+        resolved = self._resolve_url(url)
+        try:
+            subprocess.run(["xdg-open", resolved], check=False, capture_output=True, timeout=10)  # noqa: S603, S607
+            return NativeToolResult(_message=f"Opened {resolved} in the default browser.")
+        except Exception as exc:  # noqa: BLE001
+            return NativeToolResult(isError=True, _message=str(exc))
+
+    def _google_search(self, arguments: dict[str, Any]) -> NativeToolResult:
+        query = str(arguments.get("query", "") or arguments.get("target", "")).strip()
+        if not query or query.casefold() == "google":
+            return _native_failure(
+                action_type="google_search",
+                target=query or "Google",
+                reason="Tell me what you want to search for.",
+            )
+        url = f"https://www.google.com/search?q={quote_plus(query)}"
+        try:
+            completed = subprocess.run(  # noqa: S603, S607
+                ["xdg-open", url],
+                check=False,
+                capture_output=True,
+                timeout=10,
+            )
+        except Exception:  # noqa: BLE001
+            return _native_failure(
+                action_type="google_search",
+                target=query,
+                reason=f"Could not search for {query}.",
+            )
+        if getattr(completed, "returncode", 0) != 0:
+            return _native_failure(
+                action_type="google_search",
+                target=query,
+                reason=f"Could not search for {query}.",
+            )
+        return _native_success(
+            action_type="google_search",
+            target=query,
+            message=f"Opened Google search for {query}.",
+        )
+
+    def _open_desktop_app(self, arguments: dict[str, Any]) -> NativeToolResult:
+        raw_target = str(arguments.get("target", "") or "").strip().casefold()
+        raw_app = str(arguments.get("app_name", "") or "").strip().casefold()
+        app_name = _resolve_app_alias(raw_target) or _resolve_app_alias(raw_app)
+        requested = app_name or raw_target or raw_app or "app"
+        if app_name is None:
+            return _native_failure(
+                action_type="desktop_open_app",
+                target=requested,
+                reason=f"{requested} is not in the supported app list.",
+                next_step="Try browser, terminal, or files.",
+            )
+        command = _DESKTOP_APP_ALLOWLIST[app_name]
+        try:
+            completed = subprocess.run(  # noqa: S603
+                list(command),
+                check=False,
+                capture_output=True,
+                timeout=10,
+            )
+        except Exception:  # noqa: BLE001
+            return _native_failure(
+                action_type="desktop_open_app",
+                target=app_name,
+                reason=f"Could not launch {app_name}.",
+            )
+        if getattr(completed, "returncode", 0) != 0:
+            return _native_failure(
+                action_type="desktop_open_app",
+                target=app_name,
+                reason=f"Could not launch {app_name}.",
+            )
+        return _native_success(
+            action_type="desktop_open_app",
+            target=app_name,
+            message=f"Opened {app_name}.",
+        )
+
+    def _capture_screenshot(self, arguments: dict[str, Any]) -> NativeToolResult:
+        output = str(arguments.get("output_path", "") or "").strip()
+        if not output:
+            output = str(Path(tempfile.gettempdir()) / "eclipse-screenshot.png")
+        try:
+            subprocess.run(["grim", output], check=False, capture_output=True, timeout=15)  # noqa: S603, S607
+            return NativeToolResult(_message=f"Screenshot saved to {output}.")
+        except Exception as exc:  # noqa: BLE001
+            return NativeToolResult(isError=True, _message=str(exc))
+
+    @staticmethod
+    def _resolve_url(target: str) -> str:
+        lower = target.casefold().strip()
+        if lower in _KNOWN_URLS:
+            return _KNOWN_URLS[lower]
+        if re.match(r"^https?://", lower):
+            return target
+        if re.match(r"^[\w.-]+\.[a-z]{2,}(/|$)", lower):
+            return f"https://{target}"
+        return f"https://www.google.com/search?q={target.replace(' ', '+')}"
 
 
 class MCPToolClient:
@@ -245,7 +435,7 @@ class ToolRouter:
                 metadata={"target": action.target, "kind": action.kind.value},
             )
 
-        arguments = dict(action.parameters)
+        arguments = {"target": action.target, **action.parameters}
         if context.dry_run:
             return ToolExecutionResult(
                 action_id=action.id,
@@ -411,6 +601,45 @@ def render_tool_results(results: tuple[ToolExecutionResult, ...]) -> str:
     return "\n".join(lines)
 
 
+def _resolve_app_alias(value: str) -> str | None:
+    normalized = re.sub(r"[^a-z0-9_-]+", " ", value.casefold()).strip()
+    normalized = re.sub(r"[\s_-]+", " ", normalized)
+    aliases = {app_name: app_name for app_name in _DESKTOP_APP_ALLOWLIST}
+    return aliases.get(normalized)
+
+
+def _native_success(*, action_type: str, target: str, message: str) -> NativeToolResult:
+    return NativeToolResult(
+        _message=message,
+        structuredContent={
+            "success": True,
+            "action_type": action_type,
+            "target": target,
+            "user_facts": {"target": target, "action_type": action_type},
+        },
+    )
+
+
+def _native_failure(
+    *,
+    action_type: str,
+    target: str,
+    reason: str,
+    next_step: str | None = None,
+) -> NativeToolResult:
+    structured: dict[str, Any] = {
+        "success": False,
+        "action_type": action_type,
+        "target": target,
+        "failure_reason": reason,
+        "user_facts": {"target": target, "action_type": action_type},
+    }
+    if next_step:
+        structured["next_step"] = next_step
+        structured["user_facts"]["next_step"] = next_step
+    return NativeToolResult(isError=True, _message=reason, structuredContent=structured)
+
+
 def _tool_from_sdk(server_name: str, sdk_tool: object) -> MCPToolDefinition:
     schema = _jsonable(getattr(sdk_tool, "inputSchema", None) or {})
     name = str(getattr(sdk_tool, "name"))
@@ -440,10 +669,12 @@ def _infer_action_kinds(
     kinds: list[ActionKind] = []
     if "browser" in haystack and "search" in haystack:
         kinds.append(ActionKind.BROWSER_SEARCH)
+    if "google" in haystack and "search" in haystack:
+        kinds.append(ActionKind.GOOGLE_SEARCH)
     if "browser" in haystack and any(token in haystack for token in ("open", "url", "web")):
         kinds.append(ActionKind.OPEN_WEB_APP)
     if "desktop" in haystack and any(token in haystack for token in ("open", "launch", "app")):
-        kinds.append(ActionKind.PLAY_MEDIA)
+        kinds.append(ActionKind.OPEN_DESKTOP_APP)
     if "coding" in haystack or "agent" in haystack:
         kinds.append(ActionKind.OPEN_CODING_AGENT)
     if any(token in haystack for token in ("ydotool", "native input", "mouse", "keyboard")):
