@@ -120,8 +120,61 @@ def test_openwakeword_trigger_dry_run_does_not_load_audio_stack():
 def test_openwakeword_trigger_defaults_to_custom_eclipse_model():
     trigger = OpenWakeWordTrigger()
 
-    assert trigger.model_paths == (default_wake_word_model_path(),)
-    assert trigger.model_paths[0].name == "eclipse.onnx"
+    assert trigger.model_paths == ()
+    assert trigger.builtin_model == "hey_jarvis"
+    assert "hey_jarvis" in trigger.status().message
+
+
+def test_openwakeword_trigger_prefers_valid_custom_model_and_keeps_builtin_fallback(tmp_path):
+    custom_model = tmp_path / "eclipse.onnx"
+    custom_model.write_bytes(b"fake onnx")
+
+    trigger = OpenWakeWordTrigger(model_paths=(custom_model,))
+
+    assert trigger.model_paths == (custom_model,)
+    assert trigger.builtin_model == "hey_jarvis"
+    assert "preferred custom" in trigger.status().message
+    assert "fallback hey_jarvis" in trigger.status().message
+
+
+def test_openwakeword_trigger_missing_custom_model_continues_with_visible_fallback(tmp_path):
+    missing_model = tmp_path / "missing-eclipse.onnx"
+
+    trigger = OpenWakeWordTrigger(model_paths=(missing_model,))
+    status = trigger.status()
+
+    assert status.available is True
+    assert "missing" in status.message
+    assert str(missing_model) in status.message
+    assert "fallback hey_jarvis" in status.message
+
+
+def test_openwakeword_trigger_invalid_custom_model_falls_back_to_builtin(tmp_path):
+    custom_model = tmp_path / "eclipse.onnx"
+    custom_model.write_bytes(b"invalid")
+    calls = []
+
+    def model_factory(*, wakeword_models: list[str], inference_framework: str):
+        calls.append((wakeword_models, inference_framework))
+        if wakeword_models == [str(custom_model)]:
+            raise ValueError("invalid ONNX graph with internal loader detail")
+        return FakeWakeWordModel(0.8, label="hey_jarvis")
+
+    trigger = OpenWakeWordTrigger(
+        model_paths=(custom_model,),
+        model_factory=model_factory,
+        frame_source=(object(),),
+        threshold=0.5,
+    )
+
+    result = trigger.listen(dry_run=False)
+
+    assert result.success is True
+    assert result.detected is True
+    assert result.label == "hey_jarvis"
+    assert calls == [([str(custom_model)], "onnx"), (["hey_jarvis"], "onnx")]
+    assert "custom wake-word model failed" in result.message
+    assert "fallback hey_jarvis" in result.message
 
 
 def test_openwakeword_trigger_detects_matching_wake_phrase():
@@ -145,6 +198,7 @@ def test_openwakeword_trigger_ignores_unrelated_default_model_label():
         model=FakeWakeWordModel(0.9, label="hey_jarvis"),
         frame_source=(object(),),
         threshold=0.5,
+        builtin_model=None,
     )
 
     result = trigger.listen(dry_run=False)
