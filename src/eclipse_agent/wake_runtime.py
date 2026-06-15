@@ -18,7 +18,8 @@ from eclipse_agent.notification_intents import (
 )
 from eclipse_agent.notifications import NotificationStore
 from eclipse_agent.planner import create_action_plan
-from eclipse_agent.tool_router import ToolExecutionContext, ToolExecutionResult, ToolRouter
+from eclipse_agent.response_formatter import ActionResponseFormatter
+from eclipse_agent.tool_router import NativeMCPClient, ToolExecutionContext, ToolExecutionResult, ToolRouter
 from eclipse_agent.voice import (
     ListenOnce,
     ListenResult,
@@ -103,13 +104,15 @@ class WakeRuntime:
         tts: SystemTTS | None = None,
         router: ToolRouter | None = None,
         store: NotificationStore | None = None,
+        response_formatter: ActionResponseFormatter | None = None,
     ) -> None:
         self.listener = listener
         self.listener_factory = listener_factory
         self.wake_trigger = wake_trigger or OpenWakeWordTrigger()
         self.tts = tts or SystemTTS()
-        self.router = router or ToolRouter()
+        self.router = router or ToolRouter(mcp_client=NativeMCPClient())
         self.store = store or NotificationStore()
+        self.response_formatter = response_formatter or ActionResponseFormatter()
 
     def run(
         self,
@@ -409,18 +412,16 @@ class WakeRuntime:
         )
         success = bool(route_results) and all(result.success for result in route_results)
         if success:
-            executed_count = sum(1 for result in route_results if result.executed)
-            message = (
-                f"Prepared {len(route_results)} action(s)."
-                if executed_count == 0
-                else f"Executed {executed_count} of {len(route_results)} action(s)."
+            message = self.response_formatter.format(
+                command_text=normalized_command,
+                route_results=route_results,
             )
         else:
             blocked = tuple(result for result in route_results if result.requires_confirmation)
-            message = (
-                "Confirmation is required or no safe tool is available for that command."
-                if blocked
-                else "No safe action could be prepared for that command."
+            format_results = () if blocked else route_results
+            message = self.response_formatter.format(
+                command_text=normalized_command,
+                route_results=format_results,
             )
         return self._with_optional_speech(
             WakeCommandResult(

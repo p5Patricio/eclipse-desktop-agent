@@ -181,3 +181,94 @@ def test_efficient_wake_turn_records_command_after_detection(tmp_path):
         type("EfficientLoop", (), {"success": True, "turns": (result,)})()
     )
     assert "Efficient wake turn [ok/detected]" in rendered
+
+
+class CapturingTTS:
+    def __init__(self) -> None:
+        self.spoken: list[str] = []
+
+    def speak(self, text: str, *, dry_run: bool = True):
+        self.spoken.append(text)
+        from eclipse_agent.voice import SpeechResult
+
+        return SpeechResult(
+            success=True,
+            provider="fake-tts",
+            command=("speak", text),
+            message="spoken",
+            dry_run=dry_run,
+            executed=not dry_run,
+        )
+
+
+def test_handle_command_speaks_formatted_route_success_not_router_summary(tmp_path):
+    tts = CapturingTTS()
+    runtime = WakeRuntime(
+        router=ToolRouter(mcp_client=StubMCPClient()),
+        store=NotificationStore(tmp_path / "notifications.sqlite3"),
+        tts=tts,
+    )
+
+    result = runtime.handle_command("Eclipse, abre Instagram en navegador", speak=True)
+
+    assert result.success is True
+    assert tts.spoken == ["Listo, abrí Instagram."]
+    assert result.message == "Listo, abrí Instagram."
+    assert "Prepared 1 action(s)" not in tts.spoken[0]
+    assert "browser.open_url" not in tts.spoken[0]
+
+
+def test_handle_command_speaks_formatted_route_failure_not_raw_tool_error(tmp_path):
+    tts = CapturingTTS()
+    runtime = WakeRuntime(
+        router=ToolRouter(mcp_client=FakeFailingMCPClient()),
+        store=NotificationStore(tmp_path / "notifications.sqlite3"),
+        tts=tts,
+    )
+
+    result = runtime.handle_command(
+        "Eclipse, abre Instagram en navegador",
+        speak=True,
+        route_execute=True,
+        confirmed=True,
+    )
+
+    assert result.success is False
+    assert tts.spoken == ["No pude abrir Instagram: esa acción no está disponible todavía."]
+    assert "Traceback" not in tts.spoken[0]
+    assert "stderr" not in tts.spoken[0]
+
+
+class FakeFailingMCPClient(StubMCPClient):
+    def call_tool(self, tool, arguments):
+        class RawResult:
+            isError = True
+            content = []
+
+        return RawResult()
+
+
+def test_handle_command_speaks_formatted_no_action_response(tmp_path):
+    tts = CapturingTTS()
+    runtime = WakeRuntime(
+        router=ToolRouter(mcp_client=FakeNoToolsClient()),
+        store=NotificationStore(tmp_path / "notifications.sqlite3"),
+        tts=tts,
+    )
+
+    result = runtime.handle_command("Eclipse, haz magia", speak=True)
+
+    assert result.success is False
+    assert tts.spoken == [
+        "No encontré una acción segura para eso. "
+        "Pedime abrir una app, buscar algo o revisar notificaciones."
+    ]
+    assert "Listo" not in tts.spoken[0]
+
+
+class FakeNoToolsClient:
+    def discover_tools(self):
+        return ()
+
+    def call_tool(self, tool, arguments):
+        raise AssertionError("No tool should be called")
