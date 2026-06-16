@@ -11,6 +11,7 @@ from eclipse_agent.planner import (
 from eclipse_agent.safety import RiskLevel
 from eclipse_agent.tool_router import (
     MCPToolDefinition,
+    NativeMCPClient,
     ToolExecutionContext,
     ToolRouter,
     load_mcp_server_configs,
@@ -216,7 +217,7 @@ def test_tool_router_routes_screenshot_output_to_vision_adapter(tmp_path):
     vision_adapter = FakeVisionAdapter(
         VisionAnalysisResult(
             success=True,
-            model="qwen2-vl:7b",
+            model="qwen2.5vl:7b",
             image_path=image_path,
             message="Vision analysis completed.",
             text="The screenshot shows a browser window.",
@@ -253,9 +254,9 @@ def test_tool_router_reports_vision_model_failure_for_screenshot(tmp_path):
     vision_adapter = FakeVisionAdapter(
         VisionAnalysisResult(
             success=False,
-            model="qwen2-vl:7b",
+            model="qwen2.5vl:7b",
             image_path=image_path,
-            message="Vision model 'qwen2-vl:7b' is not available in Ollama.",
+            message="Vision model 'qwen2.5vl:7b' is not available in Ollama.",
         )
     )
     action = PlannedAction(
@@ -276,7 +277,232 @@ def test_tool_router_reports_vision_model_failure_for_screenshot(tmp_path):
     assert result.success is False
     assert result.executed is True
     assert "Vision analysis failed" in result.message
-    assert "qwen2-vl:7b" in result.structured_content["vision_error"]["model"]
+    assert "qwen2.5vl:7b" in result.structured_content["vision_error"]["model"]
+
+
+def test_native_google_search_encodes_query_and_returns_user_facts(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+
+        class Completed:
+            returncode = 0
+            stderr = b""
+            stdout = b""
+
+        return Completed()
+
+    monkeypatch.setattr("eclipse_agent.tool_router.subprocess.run", fake_run)
+    action = PlannedAction(
+        id="search-1",
+        kind=ActionKind.GOOGLE_SEARCH,
+        description="Search Google.",
+        risk_level=RiskLevel.MEDIUM,
+        target="Google",
+        parameters={"query": "Fedora 44 & PipeWire"},
+        tool_name="native.google_search",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action,
+        ToolExecutionContext(dry_run=False, confirmed=True),
+    )
+
+    assert result.success is True
+    assert result.executed is True
+    assert calls == [
+        ["xdg-open", "https://www.google.com/search?q=Fedora+44+%26+PipeWire"]
+    ]
+    assert result.structured_content == {
+        "success": True,
+        "action_type": "google_search",
+        "target": "Fedora 44 & PipeWire",
+        "user_facts": {"target": "Fedora 44 & PipeWire", "action_type": "google_search"},
+    }
+
+
+def test_native_google_search_rejects_empty_query_without_opening(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        "eclipse_agent.tool_router.subprocess.run",
+        lambda argv, **kwargs: calls.append(argv),
+    )
+    action = PlannedAction(
+        id="search-1",
+        kind=ActionKind.GOOGLE_SEARCH,
+        description="Search Google.",
+        risk_level=RiskLevel.MEDIUM,
+        target="Google",
+        parameters={"query": "   "},
+        tool_name="native.google_search",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action,
+        ToolExecutionContext(dry_run=False, confirmed=True),
+    )
+
+    assert result.success is False
+    assert result.executed is True
+    assert calls == []
+    assert result.structured_content["action_type"] == "google_search"
+    assert result.structured_content["failure_reason"] == "Tell me what you want to search for."
+
+
+def test_native_app_launch_uses_allowlisted_argv_and_structured_result(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+
+        class Completed:
+            returncode = 0
+            stderr = b""
+            stdout = b""
+
+        return Completed()
+
+    monkeypatch.setattr("eclipse_agent.tool_router.subprocess.run", fake_run)
+    action = PlannedAction(
+        id="app-1",
+        kind=ActionKind.OPEN_DESKTOP_APP,
+        description="Open Terminal.",
+        risk_level=RiskLevel.LOW,
+        target="terminal",
+        parameters={"app_name": "terminal; rm -rf /"},
+        tool_name="native.open_desktop_app",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action,
+        ToolExecutionContext(dry_run=False),
+    )
+
+    assert result.success is True
+    assert calls == [["xdg-open", "org.gnome.Terminal.desktop"]]
+    assert result.structured_content == {
+        "success": True,
+        "action_type": "desktop_open_app",
+        "target": "terminal",
+        "user_facts": {"target": "terminal", "action_type": "desktop_open_app"},
+    }
+
+
+def test_native_app_launch_rejects_unsupported_app_without_execution(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        "eclipse_agent.tool_router.subprocess.run",
+        lambda argv, **kwargs: calls.append(argv),
+    )
+    action = PlannedAction(
+        id="app-1",
+        kind=ActionKind.OPEN_DESKTOP_APP,
+        description="Open Slack.",
+        risk_level=RiskLevel.LOW,
+        target="slack",
+        parameters={"app_name": "slack"},
+        tool_name="native.open_desktop_app",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action,
+        ToolExecutionContext(dry_run=False),
+    )
+
+    assert result.success is False
+    assert calls == []
+    assert result.structured_content["action_type"] == "desktop_open_app"
+    assert result.structured_content["failure_reason"] == (
+        "slack is not in the supported app list."
+    )
+
+
+
+def test_native_app_launch_rejects_ambiguous_allowlisted_targets_without_execution(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        "eclipse_agent.tool_router.subprocess.run",
+        lambda argv, **kwargs: calls.append(argv),
+    )
+    action = PlannedAction(
+        id="app-ambiguous",
+        kind=ActionKind.OPEN_DESKTOP_APP,
+        description="Open Terminal or Files.",
+        risk_level=RiskLevel.LOW,
+        target="terminal or files",
+        parameters={"app_name": "terminal or files"},
+        tool_name="native.open_desktop_app",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action,
+        ToolExecutionContext(dry_run=False),
+    )
+
+    assert result.success is False
+    assert calls == []
+    assert result.structured_content["failure_reason"] == (
+        "terminal or files is not in the supported app list."
+    )
+
+
+def test_native_app_launch_rejects_shell_like_multi_token_alias_without_execution(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        "eclipse_agent.tool_router.subprocess.run",
+        lambda argv, **kwargs: calls.append(argv),
+    )
+    action = PlannedAction(
+        id="app-shell-like",
+        kind=ActionKind.OPEN_DESKTOP_APP,
+        description="Open a suspicious alias.",
+        risk_level=RiskLevel.LOW,
+        target="terminal && files",
+        parameters={"app_name": "terminal && files"},
+        tool_name="native.open_desktop_app",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action,
+        ToolExecutionContext(dry_run=False),
+    )
+
+    assert result.success is False
+    assert calls == []
+    assert result.structured_content["failure_reason"] == (
+        "terminal && files is not in the supported app list."
+    )
+
+def test_native_app_launch_failure_sanitizes_command_output(monkeypatch):
+    def fake_run(argv, **kwargs):
+        class Completed:
+            returncode = 1
+            stderr = b"Traceback secret stderr"
+            stdout = b"raw stdout"
+
+        return Completed()
+
+    monkeypatch.setattr("eclipse_agent.tool_router.subprocess.run", fake_run)
+    action = PlannedAction(
+        id="app-1",
+        kind=ActionKind.OPEN_DESKTOP_APP,
+        description="Open Files.",
+        risk_level=RiskLevel.LOW,
+        target="files",
+        parameters={"app_name": "files"},
+        tool_name="native.open_desktop_app",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action,
+        ToolExecutionContext(dry_run=False),
+    )
+
+    assert result.success is False
+    assert result.structured_content["failure_reason"] == "Could not launch files."
+    assert "stderr" not in result.structured_content["user_facts"].values()
+    assert "Traceback" not in result.message
 
 
 def test_load_mcp_server_configs_reads_stdio_servers(tmp_path):

@@ -21,7 +21,7 @@ from eclipse_agent.telemetry import ExecutionTelemetryStore, TelemetryLayer
 
 DEFAULT_LOCAL_LLM_BASE_URL = "http://localhost:11434/v1"
 DEFAULT_LOCAL_LLM_MODEL = "qwen2.5:7b"
-DEFAULT_LOCAL_VISION_MODEL = "qwen2-vl:7b"
+DEFAULT_LOCAL_VISION_MODEL = "qwen2.5vl:7b"
 DEFAULT_LOCAL_LLM_API_KEY = "ollama"
 
 
@@ -31,6 +31,8 @@ class ActionKind(StrEnum):
     PLAY_MEDIA = "play_media"
     OPEN_WEB_APP = "open_web_app"
     BROWSER_SEARCH = "browser_search"
+    GOOGLE_SEARCH = "google_search"
+    OPEN_DESKTOP_APP = "open_desktop_app"
     OPEN_CODING_AGENT = "open_coding_agent"
     MCP_TOOL = "mcp_tool"
     SCREENSHOT = "screenshot"
@@ -186,7 +188,7 @@ class VisionAdapter:
     """Analyze screenshots with a local OpenAI-compatible multimodal model.
 
     Eclipse keeps the default text planner on ``qwen2.5:7b``. This adapter only
-    overrides the model name to ``qwen2-vl:7b`` for screenshot/image requests,
+    overrides the model name to ``qwen2.5vl:7b`` for screenshot/image requests,
     allowing Ollama to unload the text model and load the vision model on demand.
     """
 
@@ -557,6 +559,14 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if web_actions:
         return web_actions
 
+    google_search_action = _maybe_google_search_action(clause, lowered, start_index)
+    if google_search_action:
+        return (google_search_action,)
+
+    desktop_app_action = _maybe_desktop_app_action(clause, lowered, start_index)
+    if desktop_app_action:
+        return (desktop_app_action,)
+
     search_action = _maybe_browser_search_action(clause, lowered, start_index)
     if search_action:
         return (search_action,)
@@ -638,6 +648,8 @@ def _maybe_browser_search_action(clause: str, lowered: str, index: int) -> Plann
         clause,
         flags=re.IGNORECASE,
     ).strip()
+    if query.casefold().strip(" ,.") in {"en google", "google"}:
+        return None
     return PlannedAction(
         id=f"action-{index}",
         kind=ActionKind.BROWSER_SEARCH,
@@ -647,6 +659,64 @@ def _maybe_browser_search_action(clause: str, lowered: str, index: int) -> Plann
         parameters={"query": query},
         tool_name="browser.search",
     )
+
+
+def _maybe_google_search_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if "google" not in lowered:
+        return None
+    if not any(verb in lowered for verb in ("busca", "buscar", "search", "find")):
+        return None
+    query = re.sub(
+        r"^(eclipse,?\s*)?(busca|buscar|search|find)(\s+(en|on))?\s+google(\s+(for|por))?\s*",
+        "",
+        clause,
+        flags=re.IGNORECASE,
+    ).strip(" ,.")
+    if not query:
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.GOOGLE_SEARCH,
+        description="Search Google for the requested query.",
+        risk_level=RiskLevel.MEDIUM,
+        target="Google",
+        parameters={"query": query},
+        tool_name="native.google_search",
+    )
+
+
+def _maybe_desktop_app_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(verb in lowered for verb in ("abre", "abrir", "open", "lanza", "launch", "inicia")):
+        return None
+    if any(token in lowered for token in ("navegador", "browser", "http://", "https://")):
+        return None
+    target = re.sub(
+        r"^(eclipse,?\s*)?(abre|abrir|open|lanza|launch|inicia)\s+",
+        "",
+        clause,
+        flags=re.IGNORECASE,
+    ).strip(" ,.")
+    if not target:
+        return None
+    if target.casefold().startswith(("my ", "mi ")):
+        return None
+    if _is_ambiguous_desktop_app_target(target):
+        return None
+    app_name = target.casefold()
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.OPEN_DESKTOP_APP,
+        description="Open a supported desktop application.",
+        risk_level=RiskLevel.LOW,
+        target=app_name,
+        parameters={"app_name": app_name},
+        tool_name="native.open_desktop_app",
+    )
+
+
+def _is_ambiguous_desktop_app_target(target: str) -> bool:
+    normalized = re.sub(r"\s+", " ", target.casefold()).strip()
+    return bool(re.search(r"\b(or|o)\b|[;&|]", normalized))
 
 
 def _maybe_screenshot_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
