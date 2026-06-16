@@ -8,15 +8,19 @@ Eclipse es un asistente personal de escritorio, siempre disponible en segundo pl
 
 Eclipse now includes two production-oriented improvements:
 
-### Custom wake word for "Eclipse"
+### Wake word fallback and optional "Eclipse" customization
 
-The wake-word runtime now expects a custom openwakeword model at:
+The safe default wake word is the builtin openwakeword model `hey_jarvis`.
+Do not replace it automatically with `models/eclipse.onnx`: the custom model
+must pass evaluation first.
+
+To try a trained custom model, place it at:
 
 ```txt
 models/eclipse.onnx
 ```
 
-Generate it with:
+Generate a candidate with:
 
 ```bash
 python scripts/generate_wakeword.py --dry-run
@@ -32,14 +36,28 @@ delegates to `openwakeword.train`. It requires the usual training assets:
 - a false-positive validation `.npy` file,
 - precomputed openwakeword feature files for training.
 
-`OpenWakeWordTrigger` now loads `models/eclipse.onnx` by default and emits a
-clear error if the model is missing.
+`OpenWakeWordTrigger` keeps `hey_jarvis` available by default. Missing or weak
+custom models fall back visibly instead of breaking startup.
+
+Start the known-good wake-efficient runtime with:
+
+```bash
+scripts/start_eclipse.sh
+```
+
+Useful overrides:
+
+```bash
+ECLIPSE_WAKEWORD_MODEL=/absolute/path/to/models/eclipse.onnx scripts/start_eclipse.sh
+ECLIPSE_WAKE_THRESHOLD=0.6 ECLIPSE_WHISPER_MODEL=small scripts/start_eclipse.sh
+ECLIPSE_START_DRY_RUN=1 scripts/start_eclipse.sh
+```
 
 ### Dynamic screenshot vision routing
 
 Eclipse can now analyze screenshots through a local vision model only when
 vision is required. Text planning continues to use `qwen2.5:7b`, but screenshot
-actions dynamically request `qwen2-vl:7b` through Ollama's OpenAI-compatible
+actions dynamically request `qwen2.5vl:7b` through Ollama's OpenAI-compatible
 endpoint.
 
 When a screenshot action returns an image path, Eclipse:
@@ -47,13 +65,13 @@ When a screenshot action returns an image path, Eclipse:
 1. reads the image from disk,
 2. base64-encodes it,
 3. sends an OpenAI-compatible multimodal payload,
-4. requests `qwen2-vl:7b` only for that call.
+4. requests `qwen2.5vl:7b` only for that call.
 
 If the vision model is missing, Eclipse returns a clear error message and tells
 you to pull it with:
 
 ```bash
-ollama pull qwen2-vl:7b
+ollama pull qwen2.5vl:7b
 ```
 
 The setup script now pulls both the text and vision models automatically.
@@ -74,8 +92,8 @@ The setup script now pulls both the text and vision models automatically.
 12. Revisar [`docs/CODING_AGENT_BRIDGE.md`](docs/CODING_AGENT_BRIDGE.md) para Claude Code/Gemini/Codex.
 13. Evaluar [`docs/AGENT_BROWSER_EVALUATION.md`](docs/AGENT_BROWSER_EVALUATION.md) para automatización web.
 14. Evaluar OpenClaw con [`docs/OPENCLAW_STRATEGY.md`](docs/OPENCLAW_STRATEGY.md), sin convertirlo todavía en dependencia crítica.
-15. Generate the custom wake-word model with [`scripts/generate_wakeword.py`](scripts/generate_wakeword.py) before enabling efficient wake mode on a fresh machine.
-16. Run [`scripts/setup_local_llm.sh`](scripts/setup_local_llm.sh) to install Ollama and pull both `qwen2.5:7b` and `qwen2-vl:7b`.
+15. Use [`scripts/start_eclipse.sh`](scripts/start_eclipse.sh) for the known-good efficient wake command; keep `hey_jarvis` active until a custom model passes evaluation.
+16. Run [`scripts/setup_local_llm.sh`](scripts/setup_local_llm.sh) to install Ollama and pull both `qwen2.5:7b` and `qwen2.5vl:7b`.
 
 ## Principios del proyecto
 
@@ -88,7 +106,7 @@ The setup script now pulls both the text and vision models automatically.
 | Provider-agnostic | OpenAI, Claude, Gemini y modelos locales deben poder intercambiarse. |
 | Auditabilidad | Toda acción importante debe quedar registrada. |
 | Plugins controlados | Las capacidades se agregan por herramientas con permisos explícitos. |
-| Wake-word custom | Eclipse should use a phrase-specific openwakeword model for the word "Eclipse". |
+| Wake-word fallback | Eclipse uses builtin `hey_jarvis` safely until a custom `eclipse.onnx` passes evaluation. |
 | Vision on demand | Screenshot analysis should load the vision model only when visual input is required. |
 
 ## Alcance inicial
@@ -137,7 +155,7 @@ scripts/                    Helpers de setup y generación local de modelos
 Proyecto entrando a fase **1: daemon always-on + voz mínima**.
 The current implementation also supports:
 
-- custom wake-word training for `Eclipse`,
+- custom wake-word training/evaluation for `Eclipse` with `hey_jarvis` fallback,
 - dynamic screenshot routing to a local vision model,
 - Wayland-native capture and typing scaffolding,
 - local Ollama text + vision setup.
@@ -159,6 +177,7 @@ PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop \
   --execute
 PYTHONPATH=src python scripts/generate_wakeword.py --dry-run
 PYTHONPATH=src python scripts/generate_wakeword.py
+scripts/start_eclipse.sh
 PYTHONPATH=src python -m eclipse_agent resource-plan
 PYTHONPATH=src python -m eclipse_agent plan \
   --instruction "Reproduce El lado oscuro en YouTube Music, también abre Instagram"
@@ -221,11 +240,15 @@ The following environment variables are useful for local setup:
 
 ```bash
 ECLIPSE_LOCAL_LLM_MODEL=qwen2.5:7b
-ECLIPSE_LOCAL_VISION_MODEL=qwen2-vl:7b
+ECLIPSE_LOCAL_VISION_MODEL=qwen2.5vl:7b
 ECLIPSE_LLM_BASE_URL=http://localhost:11434/v1
 ECLIPSE_LLM_API_KEY=ollama
-ECLIPSE_VISION_MODEL=qwen2-vl:7b
-ECLIPSE_WAKEWORD_MODEL_PATH=/absolute/path/to/models/eclipse.onnx
+ECLIPSE_VISION_MODEL=qwen2.5vl:7b
+ECLIPSE_WAKEWORD_MODEL=/absolute/path/to/models/eclipse.onnx
+ECLIPSE_WAKE_THRESHOLD=0.5
+ECLIPSE_WHISPER_MODEL=small
+ECLIPSE_START_DRY_RUN=1
+ECLIPSE_WAKEWORD_MODEL_PATH=/absolute/path/to/models/eclipse.onnx  # legacy model path helper
 ECLIPSE_MODELS_DIR=/absolute/path/to/models
 ```
 
@@ -235,13 +258,13 @@ ECLIPSE_MODELS_DIR=/absolute/path/to/models
    ```bash
    bash scripts/setup_local_llm.sh
    ```
-2. Generate the custom wake-word model:
+2. Optionally generate and evaluate a custom wake-word model:
    ```bash
-   python scripts/generate_wakeword.py
+   python scripts/generate_wakeword.py --dry-run
    ```
 3. Run Eclipse with efficient wake mode:
    ```bash
-   PYTHONPATH=src python -m eclipse_agent wake-efficient --execute
+   scripts/start_eclipse.sh
    ```
 
 ## Licencia

@@ -6,17 +6,20 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Iterable, Protocol
 
 DEFAULT_WAKE_WORD_MODEL_NAME = "eclipse.onnx"
+DEFAULT_PIPER_VOICE_MODEL = "es_MX-ald-medium.onnx"
 
 
 class TTSProvider(StrEnum):
     """Supported local text-to-speech providers."""
 
+    PIPER = "piper"
     SPD_SAY = "spd-say"
     ESPEAK_NG = "espeak-ng"
 
@@ -113,16 +116,76 @@ class WakeWordModel(Protocol):
         """Return wake-word confidence scores for one audio frame."""
 
 
+WakeWordModelFactory = Callable[..., WakeWordModel]
+
+
+class PiperTTS:
+    """High-quality neural TTS via the piper binary.
+
+    Generates a WAV file via piper and plays it with aplay/pw-play.
+    Produces natural-sounding speech comparable to Siri/Alexa.
+    """
+
+    provider = TTSProvider.PIPER
+
+    def __init__(
+        self,
+        model_path: str | Path | None = None,
+        runner: CommandRunner | None = None,
+    ) -> None:
+        self.model_path = Path(model_path).expanduser() if model_path else _default_piper_model_path()
+        self.runner = runner or _default_runner
+
+    def is_available(self) -> bool:
+        return bool(_find_piper()) and self.model_path.exists()
+
+    def speak(self, text: str, *, dry_run: bool = True) -> SpeechResult:
+        normalized = normalize_spoken_text(text)
+        piper_bin = shutil.which("piper")
+        piper_bin = _find_piper()
+        if not piper_bin:
+            return SpeechResult(False, self.provider, (), "piper binary not found.", dry_run)
+        if not self.model_path.exists():
+            return SpeechResult(
+                False, self.provider, (),
+                f"Piper voice model not found: {self.model_path}.", dry_run,
+            )
+        audio_path = Path(tempfile.gettempdir()) / "eclipse-piper.wav"
+        piper_cmd = (piper_bin, "--model", str(self.model_path), "--output_file", str(audio_path))
+        play_cmd: tuple[str, ...]
+        if shutil.which("aplay"):
+            play_cmd = ("aplay", "-q", str(audio_path))
+        elif shutil.which("pw-play"):
+            play_cmd = ("pw-play", str(audio_path))
+        else:
+            return SpeechResult(False, self.provider, piper_cmd, "No audio player found (aplay/pw-play).", dry_run)
+
+        if dry_run:
+            return SpeechResult(True, self.provider, piper_cmd, "Prepared Piper neural TTS command.", True)
+
+        gen = subprocess.run(  # noqa: S603
+            list(piper_cmd), input=normalized, text=True, capture_output=True, check=False
+        )
+        if gen.returncode != 0:
+            return SpeechResult(False, self.provider, piper_cmd, gen.stderr.strip() or "Piper synthesis failed.", False)
+        play = self.runner(play_cmd)
+        if play.returncode != 0:
+            return SpeechResult(False, self.provider, play_cmd, play.stderr.strip() or "Audio playback failed.", False)
+        return SpeechResult(True, self.provider, piper_cmd, "Neural TTS spoken via Piper.", False, True)
+
+
 class SystemTTS:
-    """Small local TTS wrapper around `spd-say`/`espeak-ng`."""
+    """Local TTS wrapper. Prefers Piper (neural) when available, falls back to spd-say/espeak-ng."""
 
     def __init__(
         self,
         preferred_provider: TTSProvider | str = TTSProvider.SPD_SAY,
         runner: CommandRunner | None = None,
+        piper: PiperTTS | None = None,
     ) -> None:
         self.preferred_provider = TTSProvider(preferred_provider)
         self.runner = runner or _default_runner
+        self._piper = piper if piper is not None else PiperTTS(runner=self.runner)
 
     def build_command(self, text: str) -> tuple[str, ...]:
         """Build a command for the first available local TTS provider."""
@@ -143,7 +206,10 @@ class SystemTTS:
         raise RuntimeError("No local TTS provider found. Install spd-say or espeak-ng.")
 
     def speak(self, text: str, *, dry_run: bool = True) -> SpeechResult:
-        """Speak text locally. Dry-run is default for safe CLI tests."""
+        """Speak text locally. Uses Piper neural TTS when available, else spd-say/espeak-ng."""
+
+        if self._piper.is_available():
+            return self._piper.speak(text, dry_run=dry_run)
 
         try:
             command = self.build_command(text)
@@ -345,25 +411,28 @@ class OpenWakeWordTrigger:
         *,
         wake_phrase: str = "Eclipse",
         model_paths: tuple[str | Path, ...] = (),
+        builtin_model: str | None = "hey_jarvis",
         threshold: float = 0.5,
         sample_rate: int = 16000,
         frame_duration_ms: int = 80,
         model: WakeWordModel | None = None,
+        model_factory: WakeWordModelFactory | None = None,
         frame_source: Iterable[object] | None = None,
     ) -> None:
         self.wake_phrase = wake_phrase
+        self.builtin_model = builtin_model
         explicit_model_paths = tuple(Path(path).expanduser() for path in model_paths)
         if explicit_model_paths:
             self.model_paths = explicit_model_paths
-        elif model is None:
-            self.model_paths = (default_wake_word_model_path(),)
         else:
             self.model_paths = ()
         self.threshold = threshold
         self.sample_rate = sample_rate
         self.frame_duration_ms = frame_duration_ms
         self.model = model
+        self.model_factory = model_factory
         self.frame_source = frame_source
+        self._startup_warnings: list[str] = []
 
     @property
     def frame_size(self) -> int:
@@ -374,23 +443,49 @@ class OpenWakeWordTrigger:
     def status(self) -> WakeWordStatus:
         """Return whether openwakeword, audio streaming, and the Eclipse model are ready."""
 
-        try:
-            import openwakeword  # noqa: F401
-            import sounddevice  # noqa: F401
-        except ModuleNotFoundError as exc:
-            return WakeWordStatus(False, self.provider, f"Missing Python module: {exc.name}.")
-        missing = tuple(path for path in self.model_paths if not path.exists())
-        if missing:
-            labels = ", ".join(str(path) for path in missing)
+        dependency_warning = _dependency_warning()
+        if self.model_paths:
+            missing = tuple(path for path in self.model_paths if not path.exists())
+            if missing:
+                labels = ", ".join(str(path) for path in missing)
+                if self.builtin_model:
+                    return WakeWordStatus(
+                        True,
+                        self.provider,
+                        (
+                            f"Custom wake-word model missing: {labels}; "
+                            f"using fallback {self.builtin_model}. {dependency_warning}"
+                        ).strip(),
+                    )
+                return WakeWordStatus(
+                    False,
+                    self.provider,
+                    (
+                        "Custom Eclipse wake-word model is missing. "
+                        f"Expected: {labels}. Generate it with scripts/generate_wakeword.py."
+                    ),
+                )
+            if self.builtin_model:
+                return WakeWordStatus(
+                    True,
+                    self.provider,
+                    (
+                        "Configured preferred custom wake-word model; "
+                        f"fallback {self.builtin_model} remains available. {dependency_warning}"
+                    ).strip(),
+                )
             return WakeWordStatus(
-                False,
+                True,
                 self.provider,
-                (
-                    "Custom Eclipse wake-word model is missing. "
-                    f"Expected: {labels}. Generate it with scripts/generate_wakeword.py."
-                ),
+                f"Configured custom wake-word model. {dependency_warning}".strip(),
             )
-        return WakeWordStatus(True, self.provider, "openwakeword and sounddevice are available.")
+        if self.builtin_model:
+            return WakeWordStatus(
+                True,
+                self.provider,
+                f"Using builtin wake-word fallback {self.builtin_model}. {dependency_warning}".strip(),
+            )
+        return WakeWordStatus(False, self.provider, "No wake-word model is configured.")
 
     def listen(
         self,
@@ -440,11 +535,14 @@ class OpenWakeWordTrigger:
                 best_label = label
                 best_score = score
             if score >= self.threshold:
+                message = f"Wake word detected for {self.wake_phrase}."
+                if self._startup_warnings:
+                    message = f"{message} {' '.join(self._startup_warnings)}"
                 return WakeWordDetectionResult(
                     success=True,
                     detected=True,
                     provider=self.provider,
-                    message=f"Wake word detected for {self.wake_phrase}.",
+                    message=message,
                     dry_run=False,
                     executed=True,
                     label=label or self.wake_phrase,
@@ -464,24 +562,54 @@ class OpenWakeWordTrigger:
         )
 
     def _load_model(self) -> WakeWordModel:
+        Model = self.model_factory or self._import_openwakeword_model()
+
+        if self.model_paths:
+            missing = tuple(path for path in self.model_paths if not path.exists())
+            if missing:
+                labels = ", ".join(str(path) for path in missing)
+                warning = (
+                    f"Custom wake-word model missing: {labels}; "
+                    f"using fallback {self.builtin_model}."
+                )
+                if not self.builtin_model:
+                    raise ValueError(
+                        "Wake-word model file does not exist: "
+                        f"{labels}. Generate the Eclipse model with scripts/generate_wakeword.py."
+                    )
+                self._startup_warnings.append(warning)
+                return Model(wakeword_models=[self.builtin_model], inference_framework="onnx")
+
+            has_onnx = any(str(p).endswith(".onnx") for p in self.model_paths)
+            framework = "onnx" if has_onnx else "tflite"
+            try:
+                return Model(
+                    wakeword_models=[str(path) for path in self.model_paths],
+                    inference_framework=framework,
+                )
+            except Exception as exc:
+                if not self.builtin_model:
+                    raise RuntimeError("Custom wake-word model failed to load.") from exc
+                self._startup_warnings.append(
+                    f"custom wake-word model failed to load; using fallback {self.builtin_model}."
+                )
+                return Model(wakeword_models=[self.builtin_model], inference_framework="onnx")
+
+        if self.builtin_model:
+            return Model(wakeword_models=[self.builtin_model], inference_framework="onnx")
+        raise RuntimeError("No wake-word model is configured.")
+
+    def _import_openwakeword_model(self) -> WakeWordModelFactory:
         try:
             from openwakeword.model import Model
         except ModuleNotFoundError as exc:
             raise RuntimeError(f"Missing Python module: {exc.name}.") from exc
-
-        missing = tuple(path for path in self.model_paths if not path.exists())
-        if missing:
-            labels = ", ".join(str(path) for path in missing)
-            raise ValueError(
-                "Wake-word model file does not exist: "
-                f"{labels}. Generate the Eclipse model with scripts/generate_wakeword.py."
-            )
-        return Model(wakeword_models=[str(path) for path in self.model_paths])
+        return Model
 
     def _best_relevant_prediction(self, prediction: dict[str, float]) -> tuple[str, float]:
         """Return the highest wake-phrase score from one model prediction."""
 
-        if self.model_paths:
+        if self.model_paths or self.builtin_model:
             return _best_prediction(prediction)
 
         normalized_phrase = _normalize_prediction_label(self.wake_phrase)
@@ -575,6 +703,23 @@ def _default_audio_path() -> Path:
     return Path(tempfile.gettempdir()) / "eclipse-listen.wav"
 
 
+def default_piper_model_path() -> Path:
+    """Return the designated Piper voice model path for Eclipse."""
+
+    explicit = _path_from_env("ECLIPSE_PIPER_MODEL_PATH")
+    if explicit:
+        return explicit
+    models_dir = _path_from_env("ECLIPSE_MODELS_DIR")
+    if models_dir:
+        return models_dir / DEFAULT_PIPER_VOICE_MODEL
+    project_root = Path(__file__).resolve().parents[2]
+    return project_root / "models" / DEFAULT_PIPER_VOICE_MODEL
+
+
+def _default_piper_model_path() -> Path:
+    return default_piper_model_path()
+
+
 def default_wake_word_model_path() -> Path:
     """Return the designated custom openwakeword model path for the Eclipse phrase."""
 
@@ -611,6 +756,18 @@ def shlex_join(command: tuple[str, ...]) -> str:
     return shlex.join(command)
 
 
+def _find_piper() -> str | None:
+    """Find the piper binary in PATH or alongside the running Python executable."""
+
+    import sys
+
+    found = shutil.which("piper")
+    if found:
+        return found
+    candidate = Path(sys.executable).parent / "piper"
+    return str(candidate) if candidate.exists() else None
+
+
 def _best_prediction(prediction: dict[str, float]) -> tuple[str, float]:
     if not prediction:
         return "", 0.0
@@ -620,3 +777,18 @@ def _best_prediction(prediction: dict[str, float]) -> tuple[str, float]:
 
 def _normalize_prediction_label(label: str) -> str:
     return " ".join(label.casefold().replace("_", " ").replace("-", " ").split())
+
+
+def _dependency_warning() -> str:
+    missing = []
+    try:
+        import openwakeword  # noqa: F401
+    except ModuleNotFoundError:
+        missing.append("openwakeword")
+    try:
+        import sounddevice  # noqa: F401
+    except ModuleNotFoundError:
+        missing.append("sounddevice")
+    if not missing:
+        return "openwakeword and sounddevice are available."
+    return f"Runtime dependency check: missing {', '.join(missing)}."
