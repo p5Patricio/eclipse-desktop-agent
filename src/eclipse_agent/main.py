@@ -22,17 +22,12 @@ from eclipse_agent.browser_automation import (
 )
 from eclipse_agent.coding_agents import build_coding_agent_prompt, get_coding_agent
 from eclipse_agent.config import EclipseConfig
-from eclipse_agent.fedora_control import (
-    DEFAULT_YDOTOOL_SOCKET,
-    FedoraNativeController,
-    WaylandNativeInput,
-    WaylandScreenCapture,
-    render_fedora_control_result,
+from eclipse_agent.desktop_control import (
+    DesktopControlAction,
+    DesktopControlResult,
+    render_desktop_control_result,
 )
-from eclipse_agent.notification_daemon import (
-    DBusNotificationDaemon,
-    render_dbus_notification_daemon_result,
-)
+from eclipse_agent.pal.factory import PlatformFactory
 from eclipse_agent.notification_intents import (
     execute_notification_voice_intent,
     parse_notification_voice_intent,
@@ -43,13 +38,7 @@ from eclipse_agent.notification_replies import (
     render_notification_reply_draft_result,
     resolve_reply_text,
 )
-from eclipse_agent.notification_service import (
-    NotificationServiceSpec,
-    NotificationUserServiceManager,
-    render_notification_service_result,
-)
 from eclipse_agent.notifications import (
-    DBusNotificationListenerPlan,
     NotificationAction,
     NotificationCenter,
     NotificationFocusMode,
@@ -301,58 +290,53 @@ def build_parser() -> argparse.ArgumentParser:
         help="When summarizing notifications, mark pending items as announced.",
     )
 
-    fedora_open = subparsers.add_parser(
-        "fedora-open",
-        help="Prepare or execute a Fedora/KDE native app launch.",
+    open_app = subparsers.add_parser(
+        "open-app",
+        help="Prepare or execute a Windows app launch.",
     )
-    fedora_open.add_argument("--app", required=True, help="Desktop app name.")
-    fedora_open.add_argument(
+    open_app.add_argument("--app", required=True, help="Application name.")
+    open_app.add_argument(
         "--execute",
         action="store_true",
         help="Actually launch the app instead of dry-running.",
     )
 
-    subparsers.add_parser("fedora-windows", help="Show planned KDE window-control strategy.")
+    subparsers.add_parser("list-windows", help="List open windows.")
 
-    fedora_screenshot = subparsers.add_parser(
-        "fedora-screenshot",
-        help="Capture a Wayland screenshot with grim. Dry-run by default.",
+    screenshot = subparsers.add_parser(
+        "screenshot",
+        help="Capture a screenshot. Dry-run by default.",
     )
-    fedora_screenshot.add_argument("--output", help="Optional output PNG path.")
-    fedora_screenshot.add_argument(
+    screenshot.add_argument("--output", help="Optional output PNG path.")
+    screenshot.add_argument(
         "--geometry",
-        help='Optional grim geometry, for example "10,20 800x600".',
+        help='Optional capture geometry, for example "10,20,800,600".',
     )
-    fedora_screenshot.add_argument(
+    screenshot.add_argument(
         "--select-region",
         action="store_true",
-        help="Use slurp to select a region before calling grim.",
+        help="Select a region before capturing.",
     )
-    fedora_screenshot.add_argument(
+    screenshot.add_argument(
         "--execute",
         action="store_true",
         help="Actually capture the screenshot instead of dry-running.",
     )
 
-    fedora_type = subparsers.add_parser(
-        "fedora-type",
-        help="Type text through ydotool. Requires --confirmed even in dry-run.",
+    type_text = subparsers.add_parser(
+        "type-text",
+        help="Type text into the focused window. Requires --confirmed even in dry-run.",
     )
-    fedora_type.add_argument("--text", required=True, help="Text to type into the focused surface.")
-    fedora_type.add_argument(
-        "--socket-path",
-        default=DEFAULT_YDOTOOL_SOCKET,
-        help="ydotoold socket path. Defaults to the Eclipse setup socket.",
-    )
-    fedora_type.add_argument(
+    type_text.add_argument("--text", required=True, help="Text to type into the focused surface.")
+    type_text.add_argument(
         "--confirmed",
         action="store_true",
         help="Required before Eclipse can simulate native input.",
     )
-    fedora_type.add_argument(
+    type_text.add_argument(
         "--execute",
         action="store_true",
-        help="Actually type through ydotool instead of preparing the command.",
+        help="Actually type the text instead of preparing the command.",
     )
 
     notifications_ingest = subparsers.add_parser(
@@ -491,11 +475,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Required for replied/dismissed status changes.",
     )
 
-    subparsers.add_parser(
-        "notifications-dbus-command",
-        help="Show the first D-Bus monitor command for native/web notifications.",
-    )
-
     notifications_listen = subparsers.add_parser(
         "notifications-listen",
         help="Run or prepare the live D-Bus notification listener.",
@@ -515,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     notifications_listen.add_argument(
         "--execute",
         action="store_true",
-        help="Actually run dbus-monitor instead of dry-running.",
+        help="Actually run the notification listener instead of dry-running.",
     )
 
     notifications_intent = subparsers.add_parser(
@@ -577,34 +556,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--execute",
         action="store_true",
         help="Actually run agent-browser instead of dry-running.",
-    )
-
-    notifications_service = subparsers.add_parser(
-        "notifications-service",
-        help="Render/install the systemd user service for notification listening.",
-    )
-    notifications_service.add_argument(
-        "--action",
-        choices=("render", "install", "enable-now"),
-        default="render",
-        help="Service management action. Defaults to rendering the unit.",
-    )
-    notifications_service.add_argument(
-        "--seconds",
-        type=int,
-        default=0,
-        help="Listener duration for ExecStart. Use 0 for long-running service.",
-    )
-    notifications_service.add_argument(
-        "--speak",
-        action="store_true",
-        help="Allow the service to speak notifications when rules allow it.",
-    )
-    notifications_service.add_argument("--store", help="Optional SQLite notification store path.")
-    notifications_service.add_argument(
-        "--execute",
-        action="store_true",
-        help="Actually write or enable/start the user service.",
     )
 
     plan = subparsers.add_parser(
@@ -714,7 +665,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _add_notification_store_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--store",
-        help="Optional SQLite notification store path. Defaults to ~/.local/share.",
+        help="Optional SQLite notification store path. Defaults to the LOCALAPPDATA folder.",
     )
 
 
@@ -902,38 +853,119 @@ def main(argv: list[str] | None = None) -> int:
         print(render_efficient_wake_loop_result(result))
         return 0 if result.success else 1
 
-    if args.command == "fedora-open":
-        result = FedoraNativeController().open_app(args.app, dry_run=not args.execute)
-        print(render_fedora_control_result(result))
+    if args.command == "open-app":
+        launcher = PlatformFactory.get_app_launcher()
+        pal_result = launcher.launch(args.app, dry_run=not args.execute)
+        result = DesktopControlResult(
+            success=pal_result.success,
+            action=DesktopControlAction.OPEN_APP,
+            command=pal_result.command,
+            message=pal_result.message,
+            dry_run=pal_result.dry_run,
+            executed=not pal_result.dry_run and pal_result.success,
+        )
+        print(render_desktop_control_result(result))
         return 0
 
-    if args.command == "fedora-windows":
-        print(render_fedora_control_result(FedoraNativeController().list_windows_command()))
+    if args.command == "list-windows":
+        wm = PlatformFactory.get_window_manager()
+        try:
+            windows = wm.list_windows()
+            result = DesktopControlResult(
+                success=True,
+                action=DesktopControlAction.LIST_WINDOWS,
+                command=(),
+                message=str(windows),
+                dry_run=False,
+                executed=True,
+            )
+        except Exception as e:  # noqa: BLE001
+            result = DesktopControlResult(
+                success=False,
+                action=DesktopControlAction.LIST_WINDOWS,
+                command=(),
+                message=f"List windows failed: {e}",
+                dry_run=False,
+                executed=False,
+            )
+        print(render_desktop_control_result(result))
         return 0
 
-    if args.command == "fedora-screenshot":
-        capture = WaylandScreenCapture()
-        if args.select_region:
-            result = capture.capture_selected_region(
-                output_path=args.output,
-                dry_run=not args.execute,
+    if args.command == "screenshot":
+        capture = PlatformFactory.get_screen_capture()
+        output_path = args.output
+        try:
+            if args.select_region:
+                pal_result = capture.capture_selected_region(
+                    output_path=output_path,
+                    dry_run=not args.execute,
+                )
+            else:
+                pal_result = capture.capture(
+                    output_path=output_path,
+                    geometry=args.geometry,
+                    dry_run=not args.execute,
+                )
+            success = getattr(pal_result, "success", True)
+            cmd = getattr(pal_result, "command", ())
+            msg = getattr(pal_result, "message", "Screenshot captured.")
+            dr = getattr(pal_result, "dry_run", not args.execute)
+            exec_ok = getattr(pal_result, "executed", args.execute and success)
+            out_p = getattr(pal_result, "output_path", Path(output_path) if output_path else None)
+
+            result = DesktopControlResult(
+                success=success,
+                action=DesktopControlAction.SCREENSHOT,
+                command=cmd,
+                message=msg,
+                dry_run=dr,
+                executed=exec_ok,
+                output_path=out_p,
             )
-        else:
-            result = capture.capture(
-                output_path=args.output,
-                geometry=args.geometry,
+        except Exception as e:  # noqa: BLE001
+            result = DesktopControlResult(
+                success=False,
+                action=DesktopControlAction.SCREENSHOT,
+                command=(),
+                message=f"Screenshot failed: {e}",
                 dry_run=not args.execute,
+                executed=False,
             )
-        print(render_fedora_control_result(result))
+        print(render_desktop_control_result(result))
         return 0 if result.success else 1
 
-    if args.command == "fedora-type":
-        result = WaylandNativeInput(socket_path=args.socket_path).type_text(
-            args.text,
-            confirmed=args.confirmed,
-            dry_run=not args.execute,
-        )
-        print(render_fedora_control_result(result))
+    if args.command == "type-text":
+        syn = PlatformFactory.get_input_synthesizer()
+        try:
+            pal_result = syn.type_text(
+                args.text,
+                confirmed=args.confirmed,
+                dry_run=not args.execute,
+            )
+            success = getattr(pal_result, "success", True)
+            cmd = getattr(pal_result, "command", ())
+            msg = getattr(pal_result, "message", "Text typed successfully.")
+            dr = getattr(pal_result, "dry_run", not args.execute)
+            exec_ok = getattr(pal_result, "executed", args.execute and success)
+
+            result = DesktopControlResult(
+                success=success,
+                action=DesktopControlAction.TYPE_TEXT,
+                command=cmd,
+                message=msg,
+                dry_run=dr,
+                executed=exec_ok,
+            )
+        except Exception as e:  # noqa: BLE001
+            result = DesktopControlResult(
+                success=False,
+                action=DesktopControlAction.TYPE_TEXT,
+                command=(),
+                message=f"Type text failed: {e}",
+                dry_run=not args.execute,
+                executed=False,
+            )
+        print(render_desktop_control_result(result))
         return 0 if result.success else 1
 
     if args.command == "notifications-ingest":
@@ -1033,18 +1065,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Marked {event.id} as {event.status.value}.")
         return 0
 
-    if args.command == "notifications-dbus-command":
-        print(DBusNotificationListenerPlan().render())
-        return 0
-
     if args.command == "notifications-listen":
         store = _notification_store(args)
-        result = DBusNotificationDaemon(center=NotificationCenter(store=store)).run(
+        daemon = PlatformFactory.get_notification_daemon()
+        if hasattr(daemon, "center"):
+            daemon.center = NotificationCenter(store=store)
+        result = daemon.run(
             seconds=args.seconds,
             speak=args.speak,
             dry_run=not args.execute,
         )
-        print(render_dbus_notification_daemon_result(result))
+        status = "executed" if result.executed else "prepared"
+        if not result.success:
+            status = "failed"
+        lines = [f"Windows notifications [{status}]: {result.message}"]
+        for item in getattr(result, "results", ()):
+            lines.append(
+                f"- {item.stored_event.id if item.stored_event else item.event.id}: "
+                f"{item.action.value} {item.event.display_source}"
+            )
+        print("\n".join(lines))
         return 0 if result.success else 1
 
     if args.command == "notifications-intent":
@@ -1083,24 +1123,6 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=not args.execute,
         )
         print(render_notification_reply_draft_result(result))
-        return 0 if result.success else 1
-
-    if args.command == "notifications-service":
-        manager = NotificationUserServiceManager(
-            spec=NotificationServiceSpec(
-                project_dir=Path.cwd(),
-                seconds=args.seconds,
-                speak=args.speak,
-                store_path=Path(args.store).expanduser() if args.store else None,
-            )
-        )
-        if args.action == "install":
-            result = manager.install(dry_run=not args.execute)
-        elif args.action == "enable-now":
-            result = manager.enable_now(dry_run=not args.execute)
-        else:
-            result = manager.render()
-        print(render_notification_service_result(result))
         return 0 if result.success else 1
 
     if args.command == "plan":

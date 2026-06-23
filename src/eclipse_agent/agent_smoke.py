@@ -47,19 +47,6 @@ def build_agent_smoke_plan(*, store_path: str | Path | None = None) -> tuple[Age
             expected="Reports local TTS/STT/browser capability status.",
         ),
         AgentSmokeStep(
-            name="notification-service",
-            goal="Render the notification listener systemd user unit.",
-            command=(
-                "python",
-                "-m",
-                "eclipse_agent",
-                "notifications-service",
-                "--action",
-                "render",
-            ),
-            expected="Shows unit content without writing files.",
-        ),
-        AgentSmokeStep(
             name="game-mode",
             goal="Put Eclipse into non-interrupting game mode.",
             command=(
@@ -75,7 +62,7 @@ def build_agent_smoke_plan(*, store_path: str | Path | None = None) -> tuple[Age
         ),
         AgentSmokeStep(
             name="capture-or-simulate-notification",
-            goal="Capture a real D-Bus notification or simulate one if testing offline.",
+            goal="Capture a real Windows notification or simulate one if testing offline.",
             command=(
                 "python",
                 "-m",

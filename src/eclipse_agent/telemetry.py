@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -202,9 +203,11 @@ def render_telemetry_summary(summary: TelemetrySummary) -> str:
 
 
 def default_telemetry_store_path() -> Path:
-    """Return the local-first telemetry database path."""
+    """Return the local-first telemetry database path under %LOCALAPPDATA%."""
 
-    return Path.home() / ".local/share/eclipse-agent/telemetry.sqlite3"
+    base = os.environ.get("LOCALAPPDATA")
+    root = Path(base) if base else Path.home() / "AppData" / "Local"
+    return root / "eclipse-agent" / "telemetry.sqlite3"
 
 
 def _utc_now() -> datetime:

@@ -16,8 +16,8 @@ def test_wakeword_workflow_documents_samples_and_artifacts():
 
     assert "positive wakeword examples" in guide
     assert "negative/background examples" in guide
-    assert "models/eclipse.onnx" in guide
-    assert ".wakeword-training/eclipse" in guide
+    assert str(Path("models/eclipse.onnx")) in guide
+    assert str(Path(".wakeword-training/eclipse")) in guide
 
 
 def test_evaluate_wakeword_scores_passes_with_strong_positive_and_low_false_activation():

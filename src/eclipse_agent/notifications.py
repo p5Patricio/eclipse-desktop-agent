@@ -11,7 +11,7 @@ the deterministic core Eclipse needs before wiring a long-running D-Bus listener
 
 from __future__ import annotations
 
-import re
+import os
 import sqlite3
 import uuid
 from dataclasses import dataclass, field, replace
@@ -569,64 +569,6 @@ class NotificationCenter:
         )
 
 
-@dataclass(frozen=True)
-class DBusNotificationListenerPlan:
-    """Command shape for the upcoming long-running D-Bus listener."""
-
-    command: tuple[str, ...] = (
-        "dbus-monitor",
-        "interface='org.freedesktop.Notifications',member='Notify'",
-    )
-    message: str = (
-        "Use this session-bus monitor as the first native/web notification feed. "
-        "The daemon will parse Notify calls and pass them to NotificationCenter."
-    )
-
-    def render(self) -> str:
-        """Render the listener plan for CLI output."""
-
-        return f"{self.message}\ncommand: {shlex_join(self.command)}"
-
-
-def parse_dbus_monitor_notify(
-    raw_block: str,
-    *,
-    received_at: datetime | None = None,
-) -> NotificationEvent | None:
-    """Parse one `dbus-monitor` Notify method-call block.
-
-    `dbus-monitor` output is textual and not ideal as a permanent API, but this
-    parser is useful for the first Fedora/KDE daemon slice. It extracts the stable
-    freedesktop Notify arguments:
-
-    1. app name
-    2. app icon
-    3. summary
-    4. body
-    5. hints such as `desktop-entry` and `urgency`
-    """
-
-    if "org.freedesktop.Notifications" not in raw_block or "member=Notify" not in raw_block:
-        return None
-
-    strings = _extract_dbus_strings(raw_block)
-    if len(strings) < 4:
-        return None
-
-    desktop_entry = _extract_dbus_hint_string(raw_block, "desktop-entry")
-    source_window = _extract_dbus_hint_string(raw_block, "x-kde-origin-name")
-    urgency = _extract_dbus_urgency(raw_block)
-    return create_notification_event(
-        app_name=strings[0],
-        desktop_entry=desktop_entry,
-        summary=strings[2],
-        body=strings[3],
-        source_window=source_window,
-        urgency=urgency,
-        received_at=received_at,
-    )
-
-
 def create_notification_event(
     *,
     app_name: str,
@@ -782,9 +724,11 @@ def render_notification_events(events: Iterable[NotificationEvent]) -> str:
 
 
 def default_notification_store_path() -> Path:
-    """Return the local-first notification database path."""
+    """Return the local-first notification database path under %LOCALAPPDATA%."""
 
-    return Path.home() / ".local/share/eclipse-agent/notifications.sqlite3"
+    base = os.environ.get("LOCALAPPDATA")
+    root = Path(base) if base else Path.home() / "AppData" / "Local"
+    return root / "eclipse-agent" / "notifications.sqlite3"
 
 
 def expires_after_minutes(minutes: int | None, *, now: datetime | None = None) -> datetime | None:
@@ -820,41 +764,6 @@ def _row_to_rule(row: sqlite3.Row) -> NotificationRule:
         mode=str(row["mode"]),
         expires_at=_from_iso(row["expires_at"]),
     )
-
-
-def _extract_dbus_strings(raw_block: str) -> tuple[str, ...]:
-    pattern = re.compile(r'^\s*string "(.*)"\s*$', flags=re.MULTILINE)
-    return tuple(_unescape_dbus_string(match.group(1)) for match in pattern.finditer(raw_block))
-
-
-def _extract_dbus_hint_string(raw_block: str, hint_name: str) -> str | None:
-    pattern = re.compile(
-        rf'string "{re.escape(hint_name)}"\s*\n\s*variant\s+string "(?P<value>.*)"',
-        flags=re.MULTILINE,
-    )
-    match = pattern.search(raw_block)
-    if not match:
-        return None
-    return _unescape_dbus_string(match.group("value"))
-
-
-def _extract_dbus_urgency(raw_block: str) -> NotificationUrgency:
-    pattern = re.compile(
-        r'string "urgency"\s*\n\s*variant\s+byte (?P<value>[0-2])',
-        flags=re.MULTILINE,
-    )
-    match = pattern.search(raw_block)
-    if not match:
-        return NotificationUrgency.NORMAL
-    return {
-        "0": NotificationUrgency.LOW,
-        "1": NotificationUrgency.NORMAL,
-        "2": NotificationUrgency.CRITICAL,
-    }[match.group("value")]
-
-
-def _unescape_dbus_string(value: str) -> str:
-    return bytes(value, "utf-8").decode("unicode_escape")
 
 
 def _looks_like_browser(value: str) -> bool:

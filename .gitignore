@@ -39,3 +39,7 @@ models/*.onnx.data
 # Engram project binding; ignore sync/export chunks by default
 .engram/*
 !.engram/config.json
+
+# Agent Teams Lite
+.atl/
+

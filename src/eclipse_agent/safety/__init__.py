@@ -1,7 +1,10 @@
-"""Initial safety primitives for Eclipse tools."""
+"""Safety primitives and screenshot redaction for Eclipse tools."""
 
 from dataclasses import dataclass
 from enum import StrEnum
+from .redactor import redact_screenshot
+
+__all__ = ["RiskLevel", "SafetyDecision", "evaluate_risk", "redact_screenshot"]
 
 
 class RiskLevel(StrEnum):

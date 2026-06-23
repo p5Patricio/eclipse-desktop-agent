@@ -63,19 +63,19 @@ def _browser_search_tool() -> MCPToolDefinition:
 def _native_type_tool() -> MCPToolDefinition:
     return MCPToolDefinition(
         name="type_text",
-        server_name="wayland",
-        description="Type text through ydotool native keyboard input.",
+        server_name="native",
+        description="Type text through native keyboard input.",
         input_schema={"type": "object"},
         action_kinds=(ActionKind.NATIVE_INPUT,),
         risk_level=RiskLevel.HIGH,
     )
 
 
-def _wayland_screenshot_tool() -> MCPToolDefinition:
+def _native_screenshot_tool() -> MCPToolDefinition:
     return MCPToolDefinition(
         name="screenshot",
-        server_name="wayland",
-        description="Capture a Wayland screenshot with grim.",
+        server_name="native",
+        description="Capture a screenshot of the screen.",
         input_schema={"type": "object"},
         action_kinds=(ActionKind.SCREENSHOT,),
         risk_level=RiskLevel.MEDIUM,
@@ -155,7 +155,7 @@ def test_tool_router_blocks_native_input_without_confirmation():
         risk_level=RiskLevel.HIGH,
         target="focused-window",
         parameters={"text": "hello"},
-        tool_name="wayland.type_text",
+        tool_name="native.type_text",
     )
     client = FakeMCPClient((_native_type_tool(),))
 
@@ -175,7 +175,7 @@ def test_tool_router_prepares_confirmed_native_input():
         risk_level=RiskLevel.HIGH,
         target="focused-window",
         parameters={"text": "hello"},
-        tool_name="wayland.type_text",
+        tool_name="native.type_text",
     )
     client = FakeMCPClient((_native_type_tool(),))
 
@@ -184,7 +184,7 @@ def test_tool_router_prepares_confirmed_native_input():
         ToolExecutionContext(dry_run=True, confirmed=True),
     )
 
-    assert result.tool_name == "wayland.type_text"
+    assert result.tool_name == "native.type_text"
     assert result.success is True
     assert result.executed is False
     assert client.calls == []
@@ -213,7 +213,7 @@ def test_tool_router_reports_missing_mcp_tool_after_safety_passes():
 def test_tool_router_routes_screenshot_output_to_vision_adapter(tmp_path):
     image_path = tmp_path / "screen.jpg"
     image_path.write_bytes(b"\xff\xd8fake-jpeg\xff\xd9")
-    client = FakeMCPClient((_wayland_screenshot_tool(),))
+    client = FakeMCPClient((_native_screenshot_tool(),))
     vision_adapter = FakeVisionAdapter(
         VisionAnalysisResult(
             success=True,
@@ -230,7 +230,7 @@ def test_tool_router_routes_screenshot_output_to_vision_adapter(tmp_path):
         risk_level=RiskLevel.MEDIUM,
         target="current-screen",
         parameters={"output_path": str(image_path), "vision_prompt": "Describe the screen."},
-        tool_name="wayland.screenshot",
+        tool_name="native.screenshot",
     )
 
     result = ToolRouter(mcp_client=client, vision_adapter=vision_adapter).route_action(
@@ -250,7 +250,7 @@ def test_tool_router_routes_screenshot_output_to_vision_adapter(tmp_path):
 def test_tool_router_reports_vision_model_failure_for_screenshot(tmp_path):
     image_path = tmp_path / "screen.jpg"
     image_path.write_bytes(b"\xff\xd8fake-jpeg\xff\xd9")
-    client = FakeMCPClient((_wayland_screenshot_tool(),))
+    client = FakeMCPClient((_native_screenshot_tool(),))
     vision_adapter = FakeVisionAdapter(
         VisionAnalysisResult(
             success=False,
@@ -266,7 +266,7 @@ def test_tool_router_reports_vision_model_failure_for_screenshot(tmp_path):
         risk_level=RiskLevel.MEDIUM,
         target="current-screen",
         parameters={"output_path": str(image_path)},
-        tool_name="wayland.screenshot",
+        tool_name="native.screenshot",
     )
 
     result = ToolRouter(mcp_client=client, vision_adapter=vision_adapter).route_action(
@@ -281,19 +281,24 @@ def test_tool_router_reports_vision_model_failure_for_screenshot(tmp_path):
 
 
 def test_native_google_search_encodes_query_and_returns_user_facts(monkeypatch):
-    calls: list[list[str]] = []
+    from eclipse_agent.pal.factory import PlatformFactory
+    from eclipse_agent.desktop_control import DesktopLaunchResult
 
-    def fake_run(argv, **kwargs):
-        calls.append(argv)
+    calls = []
 
-        class Completed:
-            returncode = 0
-            stderr = b""
-            stdout = b""
+    class FakeAppLauncher:
+        def launch(self, app_name, args=(), *, dry_run=True):
+            calls.append(app_name)
+            return DesktopLaunchResult(
+                success=True,
+                app_name=app_name,
+                command=(),
+                message=f"Opened Google search for {app_name}.",
+                dry_run=dry_run,
+            )
 
-        return Completed()
+    monkeypatch.setattr(PlatformFactory, "get_app_launcher", lambda: FakeAppLauncher())
 
-    monkeypatch.setattr("eclipse_agent.tool_router.subprocess.run", fake_run)
     action = PlannedAction(
         id="search-1",
         kind=ActionKind.GOOGLE_SEARCH,
@@ -311,9 +316,7 @@ def test_native_google_search_encodes_query_and_returns_user_facts(monkeypatch):
 
     assert result.success is True
     assert result.executed is True
-    assert calls == [
-        ["xdg-open", "https://www.google.com/search?q=Fedora+44+%26+PipeWire"]
-    ]
+    assert calls == ["https://www.google.com/search?q=Fedora+44+%26+PipeWire"]
     assert result.structured_content == {
         "success": True,
         "action_type": "google_search",
@@ -351,19 +354,24 @@ def test_native_google_search_rejects_empty_query_without_opening(monkeypatch):
 
 
 def test_native_app_launch_uses_allowlisted_argv_and_structured_result(monkeypatch):
-    calls: list[list[str]] = []
+    from eclipse_agent.pal.factory import PlatformFactory
+    from eclipse_agent.desktop_control import DesktopLaunchResult
 
-    def fake_run(argv, **kwargs):
-        calls.append(argv)
+    calls = []
 
-        class Completed:
-            returncode = 0
-            stderr = b""
-            stdout = b""
+    class FakeAppLauncher:
+        def launch(self, app_name, args=(), *, dry_run=True):
+            calls.append(app_name)
+            return DesktopLaunchResult(
+                success=True,
+                app_name=app_name,
+                command=("wt.exe",),
+                message=f"Opened {app_name}.",
+                dry_run=dry_run,
+            )
 
-        return Completed()
+    monkeypatch.setattr(PlatformFactory, "get_app_launcher", lambda: FakeAppLauncher())
 
-    monkeypatch.setattr("eclipse_agent.tool_router.subprocess.run", fake_run)
     action = PlannedAction(
         id="app-1",
         kind=ActionKind.OPEN_DESKTOP_APP,
@@ -380,7 +388,7 @@ def test_native_app_launch_uses_allowlisted_argv_and_structured_result(monkeypat
     )
 
     assert result.success is True
-    assert calls == [["xdg-open", "org.gnome.Terminal.desktop"]]
+    assert calls == ["terminal"]
     assert result.structured_content == {
         "success": True,
         "action_type": "desktop_open_app",
@@ -475,15 +483,21 @@ def test_native_app_launch_rejects_shell_like_multi_token_alias_without_executio
     )
 
 def test_native_app_launch_failure_sanitizes_command_output(monkeypatch):
-    def fake_run(argv, **kwargs):
-        class Completed:
-            returncode = 1
-            stderr = b"Traceback secret stderr"
-            stdout = b"raw stdout"
+    from eclipse_agent.pal.factory import PlatformFactory
+    from eclipse_agent.desktop_control import DesktopLaunchResult
 
-        return Completed()
+    class FakeAppLauncher:
+        def launch(self, app_name, args=(), *, dry_run=True):
+            return DesktopLaunchResult(
+                success=False,
+                app_name=app_name,
+                command=(),
+                message=f"Could not launch {app_name}.",
+                dry_run=dry_run,
+            )
 
-    monkeypatch.setattr("eclipse_agent.tool_router.subprocess.run", fake_run)
+    monkeypatch.setattr(PlatformFactory, "get_app_launcher", lambda: FakeAppLauncher())
+
     action = PlannedAction(
         id="app-1",
         kind=ActionKind.OPEN_DESKTOP_APP,
@@ -517,3 +531,70 @@ def test_load_mcp_server_configs_reads_stdio_servers(tmp_path):
     assert configs[0].name == "browser"
     assert configs[0].command == "python"
     assert configs[0].args == ("server.py",)
+
+
+def test_native_mcp_client_routes_via_pal(monkeypatch):
+    from eclipse_agent.pal.factory import PlatformFactory
+    from eclipse_agent.desktop_control import DesktopLaunchResult
+
+    launched_apps = []
+    captured_paths = []
+
+    class FakeAppLauncher:
+        def launch(self, app_name, args=(), *, dry_run=True):
+            launched_apps.append((app_name, dry_run))
+            return DesktopLaunchResult(
+                success=True,
+                app_name=app_name,
+                command=(),
+                message=f"Launched {app_name}",
+                dry_run=dry_run,
+            )
+
+    class FakeScreenCapture:
+        def capture(self, *, output_path=None, geometry=None, dry_run=True):
+            captured_paths.append((output_path, dry_run))
+
+            class FakeCaptureResult:
+                success = True
+                message = f"Screenshot saved to {output_path}."
+
+            return FakeCaptureResult()
+
+    monkeypatch.setattr(PlatformFactory, "get_app_launcher", lambda: FakeAppLauncher())
+    monkeypatch.setattr(PlatformFactory, "get_screen_capture", lambda: FakeScreenCapture())
+
+    client = NativeMCPClient()
+
+    # 1. Test URL opening
+    res = client.call_tool(
+        MCPToolDefinition(name="open_url", server_name="native"),
+        {"url": "https://example.com"}
+    )
+    assert res.isError is False
+    assert ("https://example.com", False) in launched_apps
+
+    # 2. Test Google search
+    res = client.call_tool(
+        MCPToolDefinition(name="google_search", server_name="native"),
+        {"query": "hello"}
+    )
+    assert res.isError is False
+    assert ("https://www.google.com/search?q=hello", False) in launched_apps
+
+    # 3. Test open app
+    res = client.call_tool(
+        MCPToolDefinition(name="open_desktop_app", server_name="native"),
+        {"app_name": "terminal"}
+    )
+    assert res.isError is False
+    assert ("terminal", False) in launched_apps
+
+    # 4. Test screenshot
+    res = client.call_tool(
+        MCPToolDefinition(name="capture_screenshot", server_name="native"),
+        {"output_path": "test.png"}
+    )
+    assert res.isError is False
+    assert ("test.png", False) in captured_paths
+

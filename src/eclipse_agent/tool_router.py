@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote_plus
 
+from eclipse_agent.pal.factory import PlatformFactory
 from eclipse_agent.planner import (
     ActionKind,
     ActionPlan,
@@ -21,7 +22,7 @@ from eclipse_agent.planner import (
     VisionAdapter,
     VisionAnalysisResult,
 )
-from eclipse_agent.safety import RiskLevel, evaluate_risk
+from eclipse_agent.safety import RiskLevel, evaluate_risk, redact_screenshot
 
 
 @dataclass(frozen=True)
@@ -134,33 +135,33 @@ _KNOWN_URLS: dict[str, str] = {
 }
 
 _DESKTOP_APP_ALLOWLIST: dict[str, tuple[str, ...]] = {
-    "browser": ("xdg-open", "https://www.google.com/"),
-    "terminal": ("xdg-open", "org.gnome.Terminal.desktop"),
-    "files": ("xdg-open", "org.gnome.Nautilus.desktop"),
+    "browser": ("https://www.google.com/",),
+    "terminal": ("wt.exe",),
+    "files": ("explorer.exe",),
 }
 
 
 class NativeMCPClient:
     """Execute basic Eclipse actions natively without MCP servers.
 
-    Handles open_web_app via xdg-open, browser_search via a Google URL,
-    and screenshot via grim. Used as the default router backend for
-    WakeRuntime so spoken commands work out of the box.
+    Handles open_web_app and browser_search via the default browser, and
+    screenshot via the Windows screen-capture layer. Used as the default router
+    backend for WakeRuntime so spoken commands work out of the box.
     """
 
     def discover_tools(self) -> tuple[MCPToolDefinition, ...]:
         return (
             MCPToolDefinition(
-                name="xdg_open_url",
+                name="open_url",
                 server_name="native",
-                description="Open a URL or web app in the default browser via xdg-open",
+                description="Open a URL or web app in the default browser",
                 action_kinds=(ActionKind.OPEN_WEB_APP, ActionKind.BROWSER_SEARCH),
                 risk_level=RiskLevel.MEDIUM,
             ),
             MCPToolDefinition(
                 name="google_search",
                 server_name="native",
-                description="Open a Google search URL in the default browser via xdg-open",
+                description="Open a Google search in the default browser",
                 action_kinds=(ActionKind.GOOGLE_SEARCH,),
                 risk_level=RiskLevel.MEDIUM,
             ),
@@ -172,22 +173,22 @@ class NativeMCPClient:
                 risk_level=RiskLevel.LOW,
             ),
             MCPToolDefinition(
-                name="grim_screenshot",
+                name="capture_screenshot",
                 server_name="native",
-                description="Capture a Wayland screenshot with grim",
+                description="Capture a screenshot of the screen",
                 action_kinds=(ActionKind.SCREENSHOT,),
                 risk_level=RiskLevel.LOW,
             ),
         )
 
     def call_tool(self, tool: MCPToolDefinition, arguments: dict[str, Any]) -> NativeToolResult:
-        if tool.name == "xdg_open_url":
+        if tool.name == "open_url":
             return self._open_url(arguments)
         if tool.name == "google_search":
             return self._google_search(arguments)
         if tool.name == "open_desktop_app":
             return self._open_desktop_app(arguments)
-        if tool.name == "grim_screenshot":
+        if tool.name == "capture_screenshot":
             return self._capture_screenshot(arguments)
         return NativeToolResult(isError=True, _message=f"Unknown native tool: {tool.name}")
 
@@ -197,8 +198,11 @@ class NativeMCPClient:
             return NativeToolResult(isError=True, _message="No URL or target provided.")
         resolved = self._resolve_url(url)
         try:
-            subprocess.run(["xdg-open", resolved], check=False, capture_output=True, timeout=10)  # noqa: S603, S607
-            return NativeToolResult(_message=f"Opened {resolved} in the default browser.")
+            launcher = PlatformFactory.get_app_launcher()
+            res = launcher.launch(resolved, dry_run=False)
+            if res.success:
+                return NativeToolResult(_message=f"Opened {resolved} in the default browser.")
+            return NativeToolResult(isError=True, _message=res.message)
         except Exception as exc:  # noqa: BLE001
             return NativeToolResult(isError=True, _message=str(exc))
 
@@ -212,29 +216,25 @@ class NativeMCPClient:
             )
         url = f"https://www.google.com/search?q={quote_plus(query)}"
         try:
-            completed = subprocess.run(  # noqa: S603, S607
-                ["xdg-open", url],
-                check=False,
-                capture_output=True,
-                timeout=10,
-            )
-        except Exception:  # noqa: BLE001
+            launcher = PlatformFactory.get_app_launcher()
+            res = launcher.launch(url, dry_run=False)
+            if res.success:
+                return _native_success(
+                    action_type="google_search",
+                    target=query,
+                    message=f"Opened Google search for {query}.",
+                )
             return _native_failure(
                 action_type="google_search",
                 target=query,
-                reason=f"Could not search for {query}.",
+                reason=res.message,
             )
-        if getattr(completed, "returncode", 0) != 0:
+        except Exception as exc:  # noqa: BLE001
             return _native_failure(
                 action_type="google_search",
                 target=query,
-                reason=f"Could not search for {query}.",
+                reason=f"Could not search for {query}: {exc}",
             )
-        return _native_success(
-            action_type="google_search",
-            target=query,
-            message=f"Opened Google search for {query}.",
-        )
 
     def _open_desktop_app(self, arguments: dict[str, Any]) -> NativeToolResult:
         raw_target = str(arguments.get("target", "") or "").strip().casefold()
@@ -248,38 +248,39 @@ class NativeMCPClient:
                 reason=f"{requested} is not in the supported app list.",
                 next_step="Try browser, terminal, or files.",
             )
-        command = _DESKTOP_APP_ALLOWLIST[app_name]
         try:
-            completed = subprocess.run(  # noqa: S603
-                list(command),
-                check=False,
-                capture_output=True,
-                timeout=10,
-            )
-        except Exception:  # noqa: BLE001
+            launcher = PlatformFactory.get_app_launcher()
+            res = launcher.launch(app_name, dry_run=False)
+            if res.success:
+                return _native_success(
+                    action_type="desktop_open_app",
+                    target=app_name,
+                    message=res.message or f"Opened {app_name}.",
+                )
             return _native_failure(
                 action_type="desktop_open_app",
                 target=app_name,
-                reason=f"Could not launch {app_name}.",
+                reason=res.message or f"Could not launch {app_name}.",
             )
-        if getattr(completed, "returncode", 0) != 0:
+        except Exception as exc:  # noqa: BLE001
             return _native_failure(
                 action_type="desktop_open_app",
                 target=app_name,
-                reason=f"Could not launch {app_name}.",
+                reason=f"Could not launch {app_name}: {exc}",
             )
-        return _native_success(
-            action_type="desktop_open_app",
-            target=app_name,
-            message=f"Opened {app_name}.",
-        )
 
     def _capture_screenshot(self, arguments: dict[str, Any]) -> NativeToolResult:
         output = str(arguments.get("output_path", "") or "").strip()
         if not output:
             output = str(Path(tempfile.gettempdir()) / "eclipse-screenshot.png")
         try:
-            subprocess.run(["grim", output], check=False, capture_output=True, timeout=15)  # noqa: S603, S607
+            capture_device = PlatformFactory.get_screen_capture()
+            res = capture_device.capture(output_path=output, dry_run=False)
+            success = getattr(res, "success", True)
+            msg = getattr(res, "message", f"Screenshot saved to {output}.")
+            if not success:
+                return NativeToolResult(isError=True, _message=msg)
+            redact_screenshot(output)
             return NativeToolResult(_message=f"Screenshot saved to {output}.")
         except Exception as exc:  # noqa: BLE001
             return NativeToolResult(isError=True, _message=str(exc))
@@ -677,9 +678,9 @@ def _infer_action_kinds(
         kinds.append(ActionKind.OPEN_DESKTOP_APP)
     if "coding" in haystack or "agent" in haystack:
         kinds.append(ActionKind.OPEN_CODING_AGENT)
-    if any(token in haystack for token in ("ydotool", "native input", "mouse", "keyboard")):
+    if any(token in haystack for token in ("native input", "mouse", "keyboard")):
         kinds.append(ActionKind.NATIVE_INPUT)
-    if any(token in haystack for token in ("screenshot", "screen capture", "grim")):
+    if any(token in haystack for token in ("screenshot", "screen capture")):
         kinds.append(ActionKind.SCREENSHOT)
     if not kinds:
         kinds.append(ActionKind.MCP_TOOL)
@@ -706,7 +707,6 @@ def _infer_risk_level(
             "input",
             "keyboard",
             "type",
-            "ydotool",
             "mouse",
             "click",
         )
@@ -778,7 +778,6 @@ def _requires_vision(action: PlannedAction, tool: MCPToolDefinition) -> bool:
             "vision",
             "visual",
             "analyze screen",
-            "grim",
         )
     )
 

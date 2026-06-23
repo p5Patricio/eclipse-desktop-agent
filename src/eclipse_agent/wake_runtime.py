@@ -2,13 +2,40 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tempfile
+import threading
 import time
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+
+class StatusHandler(BaseHTTPRequestHandler):
+    """HTTP request handler for the status API."""
+
+    def __init__(self, *args, runtime: WakeRuntime | None = None, **kwargs) -> None:
+        self.runtime = runtime
+        super().__init__(*args, **kwargs)
+
+    def do_GET(self) -> None:
+        if self.path == "/status":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            status_val = self.runtime.status if self.runtime else "idle"
+            response = {"status": status_val}
+            self.wfile.write(json.dumps(response).encode("utf-8"))
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
 
 from eclipse_agent.notification_intents import (
     NotificationVoiceIntentKind,
@@ -113,6 +140,38 @@ class WakeRuntime:
         self.router = router or ToolRouter(mcp_client=NativeMCPClient())
         self.store = store or NotificationStore()
         self.response_formatter = response_formatter or ActionResponseFormatter()
+
+        self.status = "idle"
+        self.pending_command = None
+        self._http_server = None
+        self._server_thread = None
+        try:
+            self._start_status_server()
+        except OSError:
+            pass
+
+    def _start_status_server(self) -> None:
+        handler = lambda *args, **kwargs: StatusHandler(*args, runtime=self, **kwargs)
+        self._http_server = HTTPServer(("127.0.0.1", 11438), handler)
+        self._server_thread = threading.Thread(target=self._http_server.serve_forever, daemon=True)
+        self._server_thread.start()
+
+    def stop_server(self) -> None:
+        """Stop the HTTP status server if it is running."""
+        if self._http_server:
+            try:
+                self._http_server.shutdown()
+                self._http_server.server_close()
+            except Exception:
+                pass
+            self._http_server = None
+        if self._server_thread:
+            try:
+                self._server_thread.join(timeout=0.5)
+            except Exception:
+                pass
+            self._server_thread = None
+
 
     def run(
         self,
@@ -219,60 +278,64 @@ class WakeRuntime:
         wake_timeout_seconds: float | None = None,
     ) -> EfficientWakeTurnResult:
         """Wait on openwakeword, then record/transcribe one command chunk."""
-
-        wake_word = self.wake_trigger.listen(
-            timeout_seconds=wake_timeout_seconds,
-            dry_run=dry_run,
-        )
-        if dry_run or not wake_word.detected:
-            return EfficientWakeTurnResult(
-                success=wake_word.success,
-                detected=wake_word.detected,
-                wake_word=wake_word,
-                message=wake_word.message,
+        self.status = "listening"
+        try:
+            wake_word = self.wake_trigger.listen(
+                timeout_seconds=wake_timeout_seconds,
+                dry_run=dry_run,
             )
-        if not wake_word.success:
-            return EfficientWakeTurnResult(
-                success=False,
-                detected=False,
-                wake_word=wake_word,
-                message=wake_word.message,
-            )
+            if dry_run or not wake_word.detected:
+                return EfficientWakeTurnResult(
+                    success=wake_word.success,
+                    detected=wake_word.detected,
+                    wake_word=wake_word,
+                    message=wake_word.message,
+                )
+            if not wake_word.success:
+                return EfficientWakeTurnResult(
+                    success=False,
+                    detected=False,
+                    wake_word=wake_word,
+                    message=wake_word.message,
+                )
 
-        base_dir = Path(audio_dir).expanduser() if audio_dir else Path(tempfile.gettempdir())
-        command_audio = base_dir / f"eclipse-efficient-command-{turn_index}.wav"
-        listener = self._get_listener()
-        command_listen = listener.run(
-            seconds=command_seconds,
-            audio_path=command_audio,
-            dry_run=False,
-        )
-        if not command_listen.success:
+            base_dir = Path(audio_dir).expanduser() if audio_dir else Path(tempfile.gettempdir())
+            command_audio = base_dir / f"eclipse-efficient-command-{turn_index}.wav"
+            listener = self._get_listener()
+            self.status = "listening"
+            command_listen = listener.run(
+                seconds=command_seconds,
+                audio_path=command_audio,
+                dry_run=False,
+            )
+            if not command_listen.success:
+                return EfficientWakeTurnResult(
+                    success=False,
+                    detected=True,
+                    wake_word=wake_word,
+                    command_listen=command_listen,
+                    message=command_listen.message,
+                )
+
+            command_text = _listen_text(command_listen)
+            command_result = self.handle_command(
+                command_text,
+                speak=speak,
+                route_execute=route_execute,
+                confirmed=confirmed,
+                mark_announced=mark_announced,
+            )
             return EfficientWakeTurnResult(
-                success=False,
+                success=command_result.success,
                 detected=True,
                 wake_word=wake_word,
+                command_text=command_text,
                 command_listen=command_listen,
-                message=command_listen.message,
+                command_result=command_result,
+                message=command_result.message,
             )
-
-        command_text = _listen_text(command_listen)
-        command_result = self.handle_command(
-            command_text,
-            speak=speak,
-            route_execute=route_execute,
-            confirmed=confirmed,
-            mark_announced=mark_announced,
-        )
-        return EfficientWakeTurnResult(
-            success=command_result.success,
-            detected=True,
-            wake_word=wake_word,
-            command_text=command_text,
-            command_listen=command_listen,
-            command_result=command_result,
-            message=command_result.message,
-        )
+        finally:
+            self.status = "idle"
 
     def run_turn(
         self,
@@ -289,80 +352,84 @@ class WakeRuntime:
         mark_announced: bool = False,
     ) -> WakeTurnResult:
         """Record/transcribe one wake window and handle a command when awakened."""
-
-        base_dir = Path(audio_dir).expanduser() if audio_dir else Path(tempfile.gettempdir())
-        wake_audio = base_dir / f"eclipse-wake-{turn_index}.wav"
-        wake_listen = self._get_listener().run(
-            seconds=wake_seconds,
-            audio_path=wake_audio,
-            dry_run=dry_run,
-        )
-        wake_text = _listen_text(wake_listen)
-
-        if dry_run:
-            return WakeTurnResult(
-                success=wake_listen.success,
-                woke=False,
-                wake_text=wake_text,
-                wake_listen=wake_listen,
-                message="Prepared wake listen window; use --execute for microphone/STT.",
+        self.status = "listening"
+        try:
+            base_dir = Path(audio_dir).expanduser() if audio_dir else Path(tempfile.gettempdir())
+            wake_audio = base_dir / f"eclipse-wake-{turn_index}.wav"
+            wake_listen = self._get_listener().run(
+                seconds=wake_seconds,
+                audio_path=wake_audio,
+                dry_run=dry_run,
             )
+            wake_text = _listen_text(wake_listen)
 
-        if not wake_listen.success:
-            return WakeTurnResult(
-                success=False,
-                woke=False,
-                wake_text=wake_text,
-                wake_listen=wake_listen,
-                message=wake_listen.message,
-            )
-
-        if not contains_wake_phrase(wake_text, wake_phrase):
-            return WakeTurnResult(
-                success=True,
-                woke=False,
-                wake_text=wake_text,
-                wake_listen=wake_listen,
-                message=f"Wake phrase {wake_phrase!r} was not detected.",
-            )
-
-        command_text = extract_command_after_wake(wake_text, wake_phrase)
-        command_listen: ListenResult | None = None
-        if not command_text:
-            command_audio = base_dir / f"eclipse-command-{turn_index}.wav"
-            command_listen = self._get_listener().run(
-                seconds=command_seconds,
-                audio_path=command_audio,
-                dry_run=False,
-            )
-            if not command_listen.success:
+            if dry_run:
                 return WakeTurnResult(
-                    success=False,
-                    woke=True,
+                    success=wake_listen.success,
+                    woke=False,
                     wake_text=wake_text,
                     wake_listen=wake_listen,
-                    command_listen=command_listen,
-                    message=command_listen.message,
+                    message="Prepared wake listen window; use --execute for microphone/STT.",
                 )
-            command_text = _listen_text(command_listen)
 
-        command_result = self.handle_command(
-            command_text,
-            speak=speak,
-            route_execute=route_execute,
-            confirmed=confirmed,
-            mark_announced=mark_announced,
-        )
-        return WakeTurnResult(
-            success=command_result.success,
-            woke=True,
-            wake_text=wake_text,
-            wake_listen=wake_listen,
-            command_text=command_text,
-            command_listen=command_listen,
-            command_result=command_result,
-            message=command_result.message,
-        )
+            if not wake_listen.success:
+                return WakeTurnResult(
+                    success=False,
+                    woke=False,
+                    wake_text=wake_text,
+                    wake_listen=wake_listen,
+                    message=wake_listen.message,
+                )
+
+            if not contains_wake_phrase(wake_text, wake_phrase):
+                return WakeTurnResult(
+                    success=True,
+                    woke=False,
+                    wake_text=wake_text,
+                    wake_listen=wake_listen,
+                    message=f"Wake phrase {wake_phrase!r} was not detected.",
+                )
+
+            command_text = extract_command_after_wake(wake_text, wake_phrase)
+            command_listen: ListenResult | None = None
+            if not command_text:
+                self.status = "listening"
+                command_audio = base_dir / f"eclipse-command-{turn_index}.wav"
+                command_listen = self._get_listener().run(
+                    seconds=command_seconds,
+                    audio_path=command_audio,
+                    dry_run=False,
+                )
+                if not command_listen.success:
+                    return WakeTurnResult(
+                        success=False,
+                        woke=True,
+                        wake_text=wake_text,
+                        wake_listen=wake_listen,
+                        command_listen=command_listen,
+                        message=command_listen.message,
+                    )
+                command_text = _listen_text(command_listen)
+
+            command_result = self.handle_command(
+                command_text,
+                speak=speak,
+                route_execute=route_execute,
+                confirmed=confirmed,
+                mark_announced=mark_announced,
+            )
+            return WakeTurnResult(
+                success=command_result.success,
+                woke=True,
+                wake_text=wake_text,
+                wake_listen=wake_listen,
+                command_text=command_text,
+                command_listen=command_listen,
+                command_result=command_result,
+                message=command_result.message,
+            )
+        finally:
+            self.status = "idle"
 
     def handle_command(
         self,
@@ -374,6 +441,7 @@ class WakeRuntime:
         mark_announced: bool = False,
     ) -> WakeCommandResult:
         """Handle one already-transcribed command."""
+        self.status = "thinking"
 
         normalized_command = command_text.strip()
         if not normalized_command:
@@ -383,6 +451,20 @@ class WakeRuntime:
                 command_text=command_text,
                 message="No command was heard after the wake phrase.",
             )
+
+        clean_cmd = normalized_command.lower().rstrip(".,!?¿¡")
+        if clean_cmd in ("sí", "yes", "confirmar", "dale", "ok", "claro") and self.pending_command is not None:
+            cmd = self.pending_command
+            self.pending_command = None
+            return self.handle_command(
+                cmd,
+                speak=speak,
+                route_execute=route_execute,
+                confirmed=True,
+                mark_announced=mark_announced,
+            )
+
+        self.pending_command = None
 
         notification_intent = parse_notification_voice_intent(normalized_command)
         if notification_intent.kind is not NotificationVoiceIntentKind.UNKNOWN:
@@ -423,6 +505,10 @@ class WakeRuntime:
                 command_text=normalized_command,
                 route_results=format_results,
             )
+
+        if route_results and any(result.requires_confirmation for result in route_results):
+            self.pending_command = normalized_command
+
         return self._with_optional_speech(
             WakeCommandResult(
                 success=success,
@@ -442,7 +528,11 @@ class WakeRuntime:
     ) -> WakeCommandResult:
         if not speak:
             return result
-        speech = self.tts.speak(result.message, dry_run=False)
+        self.status = "speaking"
+        try:
+            speech = self.tts.speak(result.message, dry_run=False)
+        finally:
+            self.status = "thinking"
         return WakeCommandResult(
             success=result.success and speech.success,
             kind=result.kind,

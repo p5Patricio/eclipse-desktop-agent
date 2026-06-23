@@ -40,14 +40,13 @@ class RuntimeDiagnostics:
 
 
 def collect_runtime_diagnostics() -> RuntimeDiagnostics:
-    """Collect local runtime availability for the next implementation blocks."""
+    """Collect local Windows runtime availability for the next implementation blocks."""
 
     capabilities = (
-        _binary_status("spd-say", "Local TTS via Speech Dispatcher."),
-        _binary_status("espeak-ng", "Fallback local TTS."),
-        _binary_status("arecord", "Microphone capture via ALSA WAV recording."),
-        _binary_status("pw-record", "Microphone capture via PipeWire recording."),
-        _python_module_status("pyaudio", "Optional Python microphone capture dependency."),
+        _python_module_status("win32gui", "Windows window management via win32gui."),
+        _python_module_status("winsdk", "Windows Runtime/winsdk API integration."),
+        _python_module_status("sounddevice", "Audio recording via sounddevice."),
+        _sapi_tts_status(),
         _python_module_status(
             "faster_whisper",
             "Local Whisper STT runtime.",
@@ -58,20 +57,22 @@ def collect_runtime_diagnostics() -> RuntimeDiagnostics:
             "Vercel browser automation CLI.",
             next_step="Install agent-browser and run agent-browser install.",
         ),
-        _binary_status("dbus-monitor", "D-Bus notification observation."),
-        _binary_status("gdbus", "D-Bus method calls and inspection."),
-        _binary_status(
-            "ydotool",
-            "Last-resort Wayland keyboard/mouse automation.",
-            next_step="Use only after semantic APIs/AT-SPI/KWin are insufficient.",
-        ),
-        _binary_status(
-            "kdotool",
-            "KDE window control helper if installed.",
-            next_step="Optional; KWin scripts/D-Bus may be used instead.",
-        ),
     )
     return RuntimeDiagnostics(capabilities=capabilities)
+
+
+def _sapi_tts_status() -> CapabilityStatus:
+    try:
+        import win32com.client
+        win32com.client.Dispatch("SAPI.SpVoice")
+        return CapabilityStatus(name="sapi_tts", available=True, detail="SAPI speech synthesis ready.")
+    except Exception as exc:  # noqa: BLE001
+        return CapabilityStatus(
+            name="sapi_tts",
+            available=False,
+            detail="SAPI speech synthesis.",
+            next_step=f"SAPI error: {exc}",
+        )
 
 
 def _binary_status(name: str, detail: str, next_step: str = "") -> CapabilityStatus:

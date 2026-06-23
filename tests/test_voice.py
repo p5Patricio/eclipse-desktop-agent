@@ -26,58 +26,111 @@ def test_normalize_spoken_text_rejects_empty_text():
         raise AssertionError("Expected empty text to be rejected")
 
 
-def test_system_tts_dry_run_prepares_command():
-    tts = SystemTTS(TTSProvider.ESPEAK_NG)
+def test_system_tts_dry_run_prepares_command(monkeypatch):
+    import sys
+    if sys.platform == "win32":
+        tts = SystemTTS()
+        result = tts.speak("Hola Eclipse", dry_run=True)
+        assert result.success is True
+        assert result.executed is False
+        assert result.provider == "sapi"
+    else:
+        tts = SystemTTS(TTSProvider.ESPEAK_NG)
+        result = tts.speak("Hola Eclipse", dry_run=True)
+        assert result.success is True
+        assert result.executed is False
+        assert result.command[-1] == "Hola Eclipse"
 
-    result = tts.speak("Hola Eclipse", dry_run=True)
 
-    assert result.success is True
-    assert result.executed is False
-    assert result.command[-1] == "Hola Eclipse"
+def test_system_tts_execute_uses_injected_runner(monkeypatch):
+    import sys
+    if sys.platform == "win32":
+        calls = []
+        class MockSpVoice:
+            def Speak(self, text):
+                calls.append(text)
 
+        import sys as sys_module
+        from unittest.mock import MagicMock
+        mock_win32com = MagicMock()
+        mock_win32com.client.Dispatch.return_value = MockSpVoice()
+        monkeypatch.setitem(sys_module.modules, "win32com", mock_win32com)
+        monkeypatch.setitem(sys_module.modules, "win32com.client", mock_win32com.client)
 
-def test_system_tts_execute_uses_injected_runner():
-    calls = []
+        tts = SystemTTS()
+        result = tts.speak("Hola", dry_run=False)
+        assert result.success is True
+        assert result.executed is True
+        assert calls == ["Hola"]
+    else:
+        calls = []
 
-    def runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        def runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    tts = SystemTTS(TTSProvider.ESPEAK_NG, runner=runner)
-
-    result = tts.speak("Hola", dry_run=False)
-
-    assert result.success is True
-    assert result.executed is True
-    assert calls
+        tts = SystemTTS(TTSProvider.ESPEAK_NG, runner=runner)
+        result = tts.speak("Hola", dry_run=False)
+        assert result.success is True
+        assert result.executed is True
+        assert calls
 
 
 def test_microphone_recorder_dry_run_prepares_wav_command(tmp_path):
+    import sys
     recorder = MicrophoneRecorder()
+    if sys.platform == "win32":
+        result = recorder.record(tmp_path / "listen.wav", seconds=2, dry_run=True)
+        assert result.success is True
+        assert result.executed is False
+        assert str(result.audio_path).endswith("listen.wav")
+    else:
+        result = recorder.record(tmp_path / "listen.wav", seconds=2, dry_run=True)
+        assert result.success is True
+        assert result.executed is False
+        assert str(result.audio_path).endswith("listen.wav")
+        assert "16000" in result.command
 
-    result = recorder.record(tmp_path / "listen.wav", seconds=2, dry_run=True)
 
-    assert result.success is True
-    assert result.executed is False
-    assert str(result.audio_path).endswith("listen.wav")
-    assert "16000" in result.command
+def test_microphone_recorder_execute_uses_runner(tmp_path, monkeypatch):
+    import sys
+    if sys.platform == "win32":
+        import sys as sys_module
+        from unittest.mock import MagicMock
+        import numpy as np
+        
+        mock_stream = MagicMock()
+        mock_stream.__enter__.return_value = mock_stream
+        mock_stream.read.return_value = (np.zeros((1600, 1), dtype='int16'), False)
+        
+        mock_sd = MagicMock()
+        mock_sd.InputStream.return_value = mock_stream
+        mock_sf = MagicMock()
+        
+        monkeypatch.setitem(sys_module.modules, "sounddevice", mock_sd)
+        monkeypatch.setitem(sys_module.modules, "soundfile", mock_sf)
 
+        recorder = MicrophoneRecorder()
+        result = recorder.record(tmp_path / "listen.wav", seconds=1, dry_run=False)
+        assert result.success is True
+        assert result.executed is True
+        assert mock_sd.InputStream.called
+        assert mock_stream.read.called
+        assert mock_sf.write.called
+    else:
+        calls = []
 
-def test_microphone_recorder_execute_uses_runner(tmp_path):
-    calls = []
+        def runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+            calls.append(command)
+            Path(command[-1]).write_bytes(b"fake wav")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    def runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        Path(command[-1]).write_bytes(b"fake wav")
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        recorder = MicrophoneRecorder(runner=runner)
+        result = recorder.record(tmp_path / "listen.wav", seconds=1, dry_run=False)
+        assert result.success is True
+        assert result.executed is True
+        assert calls
 
-    recorder = MicrophoneRecorder(runner=runner)
-
-    result = recorder.record(tmp_path / "listen.wav", seconds=1, dry_run=False)
-
-    assert result.success is True
-    assert result.executed is True
-    assert calls
 
 
 def test_local_whisper_status_reports_boolean():
@@ -206,3 +259,51 @@ def test_openwakeword_trigger_ignores_unrelated_default_model_label():
     assert result.success is True
     assert result.detected is False
     assert result.score == 0.0
+
+
+def test_windows_audio_recorder_vad_stops_early(tmp_path, monkeypatch):
+    import sounddevice as sd
+    import soundfile as sf
+    import numpy as np
+    from unittest.mock import MagicMock
+    from eclipse_agent.pal.windows.voice import WindowsAudioRecorder
+
+    rec = WindowsAudioRecorder()
+    audio_file = tmp_path / "vad_test.wav"
+
+    active_chunk = np.ones((1600, 1), dtype='int16') * 300
+    silent_chunk = np.ones((1600, 1), dtype='int16') * 10
+    
+    chunk_index = 0
+    def mock_read(size):
+        nonlocal chunk_index
+        if chunk_index < 5:
+            res = (active_chunk, False)
+        else:
+            res = (silent_chunk, False)
+        chunk_index += 1
+        return res
+
+    mock_stream = MagicMock()
+    mock_stream.__enter__.return_value = mock_stream
+    mock_stream.read.side_effect = mock_read
+
+    mock_input_stream = MagicMock(return_value=mock_stream)
+    monkeypatch.setattr(sd, "InputStream", mock_input_stream)
+
+    mock_write = MagicMock()
+    monkeypatch.setattr(sf, "write", mock_write)
+
+    res = rec.record(audio_file, seconds=5, dry_run=False)
+
+    assert res.success is True
+    assert res.dry_run is False
+    assert res.executed is True
+
+    # 5 active chunks + 15 silent chunks = 20 chunks total before VAD trigger
+    assert chunk_index == 20
+    mock_write.assert_called_once()
+    
+    written_data = mock_write.call_args[0][1]
+    assert len(written_data) == 20 * 1600
+

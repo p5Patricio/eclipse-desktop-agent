@@ -272,3 +272,155 @@ class FakeNoToolsClient:
 
     def call_tool(self, tool, arguments):
         raise AssertionError("No tool should be called")
+
+
+def test_wake_runtime_status_http_api(tmp_path, monkeypatch):
+    import urllib.request
+    import json
+    from http.server import HTTPServer
+    import threading
+    from eclipse_agent.wake_runtime import StatusHandler
+    
+    def real_start_server(self):
+        handler = lambda *args, **kwargs: StatusHandler(*args, runtime=self, **kwargs)
+        self._http_server = HTTPServer(("127.0.0.1", 11438), handler)
+        self._server_thread = threading.Thread(target=self._http_server.serve_forever, daemon=True)
+        self._server_thread.start()
+        
+    monkeypatch.setattr(WakeRuntime, "_start_status_server", real_start_server)
+    
+    runtime = WakeRuntime(store=NotificationStore(tmp_path / "notifications.sqlite3"))
+    try:
+        assert runtime.status == "idle"
+        
+        response = urllib.request.urlopen("http://127.0.0.1:11438/status", timeout=2.0)
+        assert response.status == 200
+        data = json.loads(response.read().decode("utf-8"))
+        assert data == {"status": "idle"}
+        
+        runtime.status = "listening"
+        response = urllib.request.urlopen("http://127.0.0.1:11438/status", timeout=2.0)
+        assert response.status == 200
+        data = json.loads(response.read().decode("utf-8"))
+        assert data == {"status": "listening"}
+        
+        runtime.status = "thinking"
+        response = urllib.request.urlopen("http://127.0.0.1:11438/status", timeout=2.0)
+        assert response.status == 200
+        data = json.loads(response.read().decode("utf-8"))
+        assert data == {"status": "thinking"}
+    finally:
+        runtime.stop_server()
+
+
+def test_confirmation_loop_successful_confirm(tmp_path):
+    from eclipse_agent.tool_router import ToolExecutionResult
+    
+    store = NotificationStore(tmp_path / "notifications.sqlite3")
+    runtime = WakeRuntime(store=store)
+    
+    calls = []
+    def mock_route_plan(plan, context):
+        calls.append(context)
+        return (
+            ToolExecutionResult(
+                action_id="act-1",
+                tool_name="test_tool",
+                success=context.confirmed,
+                executed=context.confirmed,
+                requires_confirmation=not context.confirmed,
+                message="requires confirmation" if not context.confirmed else "executed",
+            ),
+        )
+        
+    runtime.router.route_plan = mock_route_plan
+    
+    # Turn 1: Send a command requiring confirmation
+    res1 = runtime.handle_command("haz algo riesgoso")
+    assert res1.success is False
+    assert runtime.pending_command == "haz algo riesgoso"
+    assert len(calls) == 1
+    assert calls[0].confirmed is False
+    
+    # Turn 2: Send confirmation
+    res2 = runtime.handle_command("sí")
+    assert res2.success is True
+    assert runtime.pending_command is None
+    assert len(calls) == 2
+    assert calls[1].confirmed is True
+
+
+def test_confirmation_loop_unrelated_command_clears_pending_to_none(tmp_path):
+    from eclipse_agent.tool_router import ToolExecutionResult
+    
+    store = NotificationStore(tmp_path / "notifications.sqlite3")
+    runtime = WakeRuntime(store=store)
+    
+    results = [
+        (
+            ToolExecutionResult(
+                action_id="act-1",
+                tool_name="test_tool",
+                success=False,
+                executed=False,
+                requires_confirmation=True,
+                message="requires confirmation",
+            ),
+        ),
+        (
+            ToolExecutionResult(
+                action_id="act-2",
+                tool_name="test_tool2",
+                success=True,
+                executed=True,
+                requires_confirmation=False,
+                message="done",
+            ),
+        )
+    ]
+    
+    def mock_route_plan(plan, context):
+        return results.pop(0)
+        
+    runtime.router.route_plan = mock_route_plan
+    
+    # Turn 1: Requires confirmation
+    runtime.handle_command("haz algo riesgoso")
+    assert runtime.pending_command == "haz algo riesgoso"
+    
+    # Turn 2: Unrelated command, does not require confirmation
+    runtime.handle_command("haz algo facil")
+    assert runtime.pending_command is None
+
+
+def test_confirmation_loop_confirm_without_pending(tmp_path):
+    from eclipse_agent.tool_router import ToolExecutionResult
+    
+    store = NotificationStore(tmp_path / "notifications.sqlite3")
+    runtime = WakeRuntime(store=store)
+    
+    calls = []
+    def mock_route_plan(plan, context):
+        calls.append(plan.user_instruction)
+        return (
+            ToolExecutionResult(
+                action_id="act-1",
+                tool_name="test_tool",
+                success=True,
+                executed=True,
+                requires_confirmation=False,
+                message="handled",
+            ),
+        )
+        
+    runtime.router.route_plan = mock_route_plan
+    
+    # Send "yes" when pending_command is None
+    res = runtime.handle_command("yes")
+    assert res.success is True
+    assert runtime.pending_command is None
+    assert len(calls) == 1
+    assert "yes" in calls[0].lower()
+
+
+

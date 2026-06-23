@@ -11,7 +11,7 @@ def _route_result(
 ) -> ToolExecutionResult:
     return ToolExecutionResult(
         action_id='action-1',
-        tool_name='native.xdg_open_url',
+        tool_name='native.open_url',
         success=success,
         executed=success,
         requires_confirmation=requires_confirmation,
@@ -38,7 +38,7 @@ def test_successful_action_summary_uses_user_facts_and_hides_router_internals():
     assert 'MCP' not in spoken
     assert 'structured result' not in spoken
     assert '{' not in spoken
-    assert 'native.xdg_open_url' not in spoken
+    assert 'native.open_url' not in spoken
 
 
 def test_recoverable_failure_uses_safe_reason_and_one_next_step_only():

@@ -181,7 +181,7 @@ def test_screen_question_plans_screenshot_action():
     plan = create_action_plan("What is on my screen?")
 
     assert plan.actions[0].kind is ActionKind.SCREENSHOT
-    assert plan.actions[0].tool_name == "wayland.screenshot"
+    assert plan.actions[0].tool_name == "native.capture_screenshot"
     assert "vision_prompt" in plan.actions[0].parameters
 
 

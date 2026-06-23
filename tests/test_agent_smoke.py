@@ -10,7 +10,7 @@ def test_smoke_plan_contains_real_agent_test_steps(tmp_path):
 
     names = tuple(step.name for step in steps)
 
-    assert "notification-service" in names
+    assert "game-mode" in names
     assert "wake-command-pipeline" in names
     assert "wake-loop-microphone" in names
     assert "browser-snapshot" in names

@@ -745,7 +745,7 @@ def _maybe_screenshot_action(clause: str, lowered: str, index: int) -> PlannedAc
                 f"actionable observations. User request: {clause}"
             )
         },
-        tool_name="wayland.screenshot",
+        tool_name="native.capture_screenshot",
     )
 
 

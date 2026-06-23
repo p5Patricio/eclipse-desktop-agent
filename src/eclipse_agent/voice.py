@@ -208,6 +208,11 @@ class SystemTTS:
     def speak(self, text: str, *, dry_run: bool = True) -> SpeechResult:
         """Speak text locally. Uses Piper neural TTS when available, else spd-say/espeak-ng."""
 
+        import sys
+        if sys.platform == "win32" and type(self) is SystemTTS:
+            from eclipse_agent.pal.windows.voice import WindowsTTSProvider
+            return WindowsTTSProvider().speak(text, dry_run=dry_run)
+
         if self._piper.is_available():
             return self._piper.speak(text, dry_run=dry_run)
 
@@ -298,6 +303,11 @@ class MicrophoneRecorder:
     ) -> RecordingResult:
         """Prepare or record a short microphone clip."""
 
+        import sys
+        if sys.platform == "win32" and type(self) is MicrophoneRecorder:
+            from eclipse_agent.pal.windows.voice import WindowsAudioRecorder
+            return WindowsAudioRecorder().record(audio_path, seconds=seconds, dry_run=dry_run)
+
         path = Path(audio_path).expanduser()
         try:
             command = self.build_record_command(path, seconds=seconds)
@@ -363,6 +373,31 @@ class LocalWhisperSTT:
         return TranscriptionResult(True, text, path, self.provider, "Audio transcribed.", segments)
 
 
+def play_sound_cue(frequency: float, duration: float) -> None:
+    """Play a sound cue at the specified frequency and duration using numpy and sounddevice.
+    Includes a fade-out to prevent pops.
+    """
+    try:
+        import numpy as np
+        import sounddevice as sd
+    except ImportError:
+        return
+
+    sample_rate = 44100
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+    wave = np.sin(2 * np.pi * frequency * t)
+    
+    # Fade out
+    fade_duration = min(0.01, duration / 2.0)
+    fade_samples = int(sample_rate * fade_duration)
+    if fade_samples > 0:
+        fade_out = np.linspace(1.0, 0.0, fade_samples)
+        wave[-fade_samples:] *= fade_out
+
+    sd.play(wave, sample_rate)
+    sd.wait()
+
+
 class ListenOnce:
     """Record once and transcribe once."""
 
@@ -384,7 +419,11 @@ class ListenOnce:
         """Record one clip and transcribe it."""
 
         path = Path(audio_path).expanduser() if audio_path else _default_audio_path()
+        if not dry_run:
+            play_sound_cue(880.0, 0.1)
         recording = self.recorder.record(path, seconds=seconds, dry_run=dry_run)
+        if not dry_run:
+            play_sound_cue(440.0, 0.1)
         if dry_run or not recording.success:
             return ListenResult(recording.success, recording, None, recording.message)
         transcription = self.stt.transcribe_file(recording.audio_path)
@@ -394,6 +433,7 @@ class ListenOnce:
             transcription,
             transcription.message if transcription else recording.message,
         )
+
 
 
 class OpenWakeWordTrigger:

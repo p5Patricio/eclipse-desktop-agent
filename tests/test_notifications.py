@@ -1,7 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
 from eclipse_agent.notifications import (
-    DBusNotificationListenerPlan,
     NotificationAction,
     NotificationCenter,
     NotificationFocusMode,
@@ -13,7 +12,6 @@ from eclipse_agent.notifications import (
     build_notification_digest,
     create_notification_event,
     normalize_notification_source,
-    parse_dbus_monitor_notify,
 )
 from eclipse_agent.voice import SpeechResult
 
@@ -163,49 +161,3 @@ def test_temporary_focus_mode_expires_back_to_normal(tmp_path):
     state = store.get_runtime_state(now=now + timedelta(minutes=11))
 
     assert state.mode is NotificationFocusMode.NORMAL
-
-
-def test_dbus_notification_listener_plan_uses_freedesktop_notify_monitor():
-    plan = DBusNotificationListenerPlan()
-
-    assert "dbus-monitor" in plan.command
-    assert "org.freedesktop.Notifications" in plan.command[1]
-
-
-def test_parse_dbus_monitor_notify_block_extracts_event_fields():
-    header = (
-        "method call time=1710000000.1 sender=:1.42 -> destination=:1.99 serial=7 "
-        "path=/org/freedesktop/Notifications; interface=org.freedesktop.Notifications; "
-        "member=Notify"
-    )
-    raw = f"""
-{header}
-   string "Google Chrome"
-   uint32 0
-   string "chrome"
-   string "Instagram"
-   string "Nuevo mensaje de Ana"
-   array [
-   ]
-   array [
-      dict entry(
-         string "desktop-entry"
-         variant             string "google-chrome"
-      )
-      dict entry(
-         string "urgency"
-         variant             byte 1
-      )
-   ]
-   int32 -1
-"""
-
-    event = parse_dbus_monitor_notify(raw)
-
-    assert event is not None
-    assert event.app_name == "Google Chrome"
-    assert event.desktop_entry == "google-chrome"
-    assert event.summary == "Instagram"
-    assert event.body == "Nuevo mensaje de Ana"
-    assert event.source_kind is NotificationSourceKind.WEB
-    assert event.source_label == "Instagram"
