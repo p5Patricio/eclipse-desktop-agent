@@ -185,6 +185,13 @@ class NativeMCPClient:
                 action_kinds=(ActionKind.SYSTEM_CONTROL,),
                 risk_level=RiskLevel.LOW,
             ),
+            MCPToolDefinition(
+                name="read_clipboard",
+                server_name="native",
+                description="Read the current clipboard text",
+                action_kinds=(ActionKind.READ_CLIPBOARD,),
+                risk_level=RiskLevel.LOW,
+            ),
         )
 
     def call_tool(self, tool: MCPToolDefinition, arguments: dict[str, Any]) -> NativeToolResult:
@@ -198,6 +205,8 @@ class NativeMCPClient:
             return self._capture_screenshot(arguments)
         if tool.name == "system_control":
             return self._system_control(arguments)
+        if tool.name == "read_clipboard":
+            return self._read_clipboard(arguments)
         return NativeToolResult(isError=True, _message=f"Unknown native tool: {tool.name}")
 
     def _open_url(self, arguments: dict[str, Any]) -> NativeToolResult:
@@ -319,11 +328,30 @@ class NativeMCPClient:
                 action_type="system_control",
                 target=action.value,
                 message=result.message,
+                extra_facts={"detail": result.message},
             )
         return _native_failure(
             action_type="system_control",
             target=action.value,
             reason=result.message,
+        )
+
+    def _read_clipboard(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.clipboard import WindowsClipboard
+
+        result = WindowsClipboard().read()
+        if not result.success:
+            return _native_failure(
+                action_type="read_clipboard",
+                target="clipboard",
+                reason=result.message,
+            )
+        spoken = result.text or "The clipboard is empty."
+        return _native_success(
+            action_type="read_clipboard",
+            target="clipboard",
+            message=spoken,
+            extra_facts={"spoken": spoken},
         )
 
     @staticmethod
@@ -650,14 +678,23 @@ def _resolve_app_alias(value: str) -> str | None:
     return aliases.get(normalized)
 
 
-def _native_success(*, action_type: str, target: str, message: str) -> NativeToolResult:
+def _native_success(
+    *,
+    action_type: str,
+    target: str,
+    message: str,
+    extra_facts: dict[str, Any] | None = None,
+) -> NativeToolResult:
+    user_facts: dict[str, Any] = {"target": target, "action_type": action_type}
+    if extra_facts:
+        user_facts.update(extra_facts)
     return NativeToolResult(
         _message=message,
         structuredContent={
             "success": True,
             "action_type": action_type,
             "target": target,
-            "user_facts": {"target": target, "action_type": action_type},
+            "user_facts": user_facts,
         },
     )
 

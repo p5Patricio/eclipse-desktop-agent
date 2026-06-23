@@ -213,6 +213,14 @@ def test_plans_lock_screen_as_medium_risk():
     assert action.risk_level is RiskLevel.MEDIUM
 
 
+def test_plans_clipboard_question_as_read_clipboard():
+    plan = create_action_plan("Eclipse, qué tengo copiado")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.READ_CLIPBOARD
+    assert action.tool_name == "native.read_clipboard"
+
+
 def test_coding_agent_action_requires_confirmation():
     plan = create_action_plan("Abre Cloud Code y desarrolla una landing")
 

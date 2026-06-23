@@ -41,6 +41,66 @@ def test_successful_action_summary_uses_user_facts_and_hides_router_internals():
     assert 'native.open_url' not in spoken
 
 
+def test_read_clipboard_speaks_the_content_verbatim():
+    formatter = ActionResponseFormatter()
+    result = _route_result(
+        structured_content={
+            'success': True,
+            'action_type': 'read_clipboard',
+            'target': 'clipboard',
+            'user_facts': {
+                'action_type': 'read_clipboard',
+                'target': 'clipboard',
+                'spoken': 'hola mundo',
+            },
+        },
+    )
+
+    spoken = formatter.format(command_text='Eclipse, qué tengo copiado', route_results=(result,))
+
+    assert spoken == 'hola mundo'
+
+
+def test_system_control_volume_speaks_localized_confirmation():
+    formatter = ActionResponseFormatter()
+    result = _route_result(
+        structured_content={
+            'success': True,
+            'action_type': 'system_control',
+            'target': 'volume_up',
+            'user_facts': {
+                'action_type': 'system_control',
+                'target': 'volume_up',
+                'detail': 'Sent volume_up.',
+            },
+        },
+    )
+
+    spoken = formatter.format(command_text='Eclipse, subí el volumen', route_results=(result,))
+
+    assert spoken == 'Listo, subí el volumen.'
+
+
+def test_system_control_battery_speaks_the_status_detail():
+    formatter = ActionResponseFormatter()
+    result = _route_result(
+        structured_content={
+            'success': True,
+            'action_type': 'system_control',
+            'target': 'battery',
+            'user_facts': {
+                'action_type': 'system_control',
+                'target': 'battery',
+                'detail': 'Battery 72%, on AC power.',
+            },
+        },
+    )
+
+    spoken = formatter.format(command_text='Eclipse, cuánta batería tengo', route_results=(result,))
+
+    assert '72%' in spoken
+
+
 def test_recoverable_failure_uses_safe_reason_and_one_next_step_only():
     formatter = ActionResponseFormatter()
     result = _route_result(

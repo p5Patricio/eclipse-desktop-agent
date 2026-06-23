@@ -608,6 +608,33 @@ def test_native_system_control_rejects_unknown_action():
     assert "not a supported system action" in result.message
 
 
+def test_native_read_clipboard_returns_text(monkeypatch):
+    import eclipse_agent.clipboard as clip_mod
+    from eclipse_agent.clipboard import ClipboardResult
+
+    class FakeClipboard:
+        def read(self) -> ClipboardResult:
+            return ClipboardResult(True, "read", "copied text", "copied text")
+
+    monkeypatch.setattr(clip_mod, "WindowsClipboard", lambda: FakeClipboard())
+
+    action = PlannedAction(
+        id="clip-1",
+        kind=ActionKind.READ_CLIPBOARD,
+        description="Read the clipboard.",
+        risk_level=RiskLevel.LOW,
+        target="clipboard",
+        tool_name="native.read_clipboard",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action, ToolExecutionContext(dry_run=False)
+    )
+
+    assert result.success is True
+    assert result.structured_content["user_facts"]["spoken"] == "copied text"
+
+
 def test_load_mcp_server_configs_reads_stdio_servers(tmp_path):
     path = tmp_path / "mcp-servers.json"
     path.write_text(

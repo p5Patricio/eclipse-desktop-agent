@@ -103,6 +103,7 @@ class ActionKind(StrEnum):
     SCREENSHOT = "screenshot"
     NATIVE_INPUT = "native_input"
     SYSTEM_CONTROL = "system_control"
+    READ_CLIPBOARD = "read_clipboard"
     UNKNOWN = "unknown"
 
 
@@ -695,6 +696,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if system_action:
         return (system_action,)
 
+    clipboard_action = _maybe_read_clipboard_action(clause, lowered, start_index)
+    if clipboard_action:
+        return (clipboard_action,)
+
     media_action = _maybe_media_action(clause, lowered, start_index)
     if media_action:
         return (media_action,)
@@ -925,6 +930,22 @@ def _maybe_system_control_action(clause: str, lowered: str, index: int) -> Plann
         target=action,
         parameters={"system_action": action},
         tool_name="native.system_control",
+    )
+
+
+def _maybe_read_clipboard_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(
+        token in lowered for token in ("portapapeles", "clipboard", "copiado", "copied")
+    ):
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.READ_CLIPBOARD,
+        description="Read the current clipboard contents.",
+        risk_level=RiskLevel.LOW,
+        target="clipboard",
+        parameters={},
+        tool_name="native.read_clipboard",
     )
 
 

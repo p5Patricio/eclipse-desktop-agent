@@ -29,6 +29,7 @@ from eclipse_agent.desktop_control import (
     DesktopControlResult,
     render_desktop_control_result,
 )
+from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
 from eclipse_agent.system_control import SystemAction, render_system_control_result
 from eclipse_agent.pal.factory import PlatformFactory
 from eclipse_agent.notification_intents import (
@@ -368,6 +369,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Required to execute disruptive actions such as lock.",
     )
+
+    clipboard = subparsers.add_parser(
+        "clipboard",
+        help="Read or write the Windows clipboard.",
+    )
+    clipboard.add_argument("--action", required=True, choices=("read", "write"))
+    clipboard.add_argument("--text", help="Text to copy when --action is write.")
 
     notifications_ingest = subparsers.add_parser(
         "notifications-ingest",
@@ -1025,6 +1033,16 @@ def _cmd_system(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _cmd_clipboard(args: argparse.Namespace) -> int:
+    clip = WindowsClipboard()
+    if args.action == "write":
+        result = clip.write(args.text or "")
+    else:
+        result = clip.read()
+    print(render_clipboard_result(result))
+    return 0 if result.success else 1
+
+
 def _cmd_notifications_ingest(args: argparse.Namespace) -> int:
     store = _notification_store(args)
     event = create_notification_event(
@@ -1280,6 +1298,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "screenshot": _cmd_screenshot,
     "type-text": _cmd_type_text,
     "system": _cmd_system,
+    "clipboard": _cmd_clipboard,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

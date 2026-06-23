@@ -90,13 +90,21 @@ class ActionResponseFormatter:
 
         result = route_results[0]
         facts = _facts_for(result)
-        target = _display_target(
-            facts.get("target") or _safe_text(result.metadata.get("target", "")) or "eso"
-        )
+        raw_target = facts.get("target") or _safe_text(result.metadata.get("target", "")) or "eso"
+        target = _display_target(raw_target)
         action_type = str(facts.get("action_type") or "").strip()
 
         if result.success:
-            return _success_template(language=language, action_type=action_type, target=target)
+            spoken = str(facts.get("spoken") or "").strip()
+            if spoken:
+                return spoken
+            return _success_template(
+                language=language,
+                action_type=action_type,
+                target=target,
+                raw_target=str(raw_target),
+                detail=str(facts.get("detail") or ""),
+            )
 
         reason = _safe_text(facts.get("failure_reason") or "")
         if not reason:
@@ -138,7 +146,36 @@ def _display_target(target: object) -> str:
     return text
 
 
-def _success_template(*, language: str, action_type: str, target: str) -> str:
+_SYSTEM_PHRASES_ES = {
+    "volume_up": "Listo, subí el volumen.",
+    "volume_down": "Listo, bajé el volumen.",
+    "mute": "Listo, silencié el audio.",
+    "media_play_pause": "Listo.",
+    "media_next": "Siguiente.",
+    "media_previous": "Anterior.",
+    "lock": "Bloqueé la pantalla.",
+}
+_SYSTEM_PHRASES_EN = {
+    "volume_up": "Done, volume up.",
+    "volume_down": "Done, volume down.",
+    "mute": "Done, muted.",
+    "media_play_pause": "Done.",
+    "media_next": "Next track.",
+    "media_previous": "Previous track.",
+    "lock": "Screen locked.",
+}
+
+
+def _success_template(
+    *,
+    language: str,
+    action_type: str,
+    target: str,
+    raw_target: str = "",
+    detail: str = "",
+) -> str:
+    if action_type == "system_control":
+        return _system_control_phrase(language=language, action=raw_target, detail=detail)
     if action_type in {"browser_search", "google_search"}:
         return (
             f"Done, I searched for {target}."
@@ -146,6 +183,15 @@ def _success_template(*, language: str, action_type: str, target: str) -> str:
             else f"Listo, busqué {target}."
         )
     return f"Done, I opened {target}." if language == "en" else f"Listo, abrí {target}."
+
+
+def _system_control_phrase(*, language: str, action: str, detail: str) -> str:
+    if action == "battery":
+        if detail:
+            return detail
+        return "Battery status unavailable." if language == "en" else "No pude leer la batería."
+    table = _SYSTEM_PHRASES_EN if language == "en" else _SYSTEM_PHRASES_ES
+    return table.get(action, "Done." if language == "en" else "Listo.")
 
 
 def _facts_for(result: ToolExecutionResult) -> dict[str, Any]:
