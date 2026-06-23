@@ -551,6 +551,63 @@ def test_native_app_launch_failure_sanitizes_command_output(monkeypatch):
     assert "Traceback" not in result.message
 
 
+def test_native_system_control_runs_action_via_pal(monkeypatch):
+    from eclipse_agent.pal.factory import PlatformFactory
+    from eclipse_agent.system_control import SystemAction, SystemControlResult
+
+    calls = []
+
+    class FakeController:
+        def run(self, action, *, dry_run=True):
+            calls.append((action, dry_run))
+            return SystemControlResult(
+                success=True,
+                action=action,
+                message=f"Sent {action.value}.",
+                dry_run=False,
+                executed=True,
+            )
+
+    monkeypatch.setattr(PlatformFactory, "get_system_controller", lambda: FakeController())
+
+    action = PlannedAction(
+        id="sys-1",
+        kind=ActionKind.SYSTEM_CONTROL,
+        description="Lower the volume.",
+        risk_level=RiskLevel.LOW,
+        target="volume_down",
+        parameters={"system_action": "volume_down"},
+        tool_name="native.system_control",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action, ToolExecutionContext(dry_run=False, confirmed=True)
+    )
+
+    assert result.success is True
+    assert result.executed is True
+    assert calls[0][0] is SystemAction.VOLUME_DOWN
+
+
+def test_native_system_control_rejects_unknown_action():
+    action = PlannedAction(
+        id="sys-2",
+        kind=ActionKind.SYSTEM_CONTROL,
+        description="Bogus system action.",
+        risk_level=RiskLevel.LOW,
+        target="teleport",
+        parameters={"system_action": "teleport"},
+        tool_name="native.system_control",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action, ToolExecutionContext(dry_run=False)
+    )
+
+    assert result.success is False
+    assert "not a supported system action" in result.message
+
+
 def test_load_mcp_server_configs_reads_stdio_servers(tmp_path):
     path = tmp_path / "mcp-servers.json"
     path.write_text(

@@ -178,6 +178,13 @@ class NativeMCPClient:
                 action_kinds=(ActionKind.SCREENSHOT,),
                 risk_level=RiskLevel.LOW,
             ),
+            MCPToolDefinition(
+                name="system_control",
+                server_name="native",
+                description="Control system volume, media playback, lock, and battery",
+                action_kinds=(ActionKind.SYSTEM_CONTROL,),
+                risk_level=RiskLevel.LOW,
+            ),
         )
 
     def call_tool(self, tool: MCPToolDefinition, arguments: dict[str, Any]) -> NativeToolResult:
@@ -189,6 +196,8 @@ class NativeMCPClient:
             return self._open_desktop_app(arguments)
         if tool.name == "capture_screenshot":
             return self._capture_screenshot(arguments)
+        if tool.name == "system_control":
+            return self._system_control(arguments)
         return NativeToolResult(isError=True, _message=f"Unknown native tool: {tool.name}")
 
     def _open_url(self, arguments: dict[str, Any]) -> NativeToolResult:
@@ -283,6 +292,39 @@ class NativeMCPClient:
             return NativeToolResult(_message=f"Screenshot saved to {output}.")
         except Exception as exc:  # noqa: BLE001
             return NativeToolResult(isError=True, _message=str(exc))
+
+    def _system_control(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.system_control import SystemAction
+
+        raw = str(arguments.get("system_action", "") or arguments.get("target", "")).strip()
+        try:
+            action = SystemAction(raw)
+        except ValueError:
+            return _native_failure(
+                action_type="system_control",
+                target=raw or "system",
+                reason=f"{raw or 'that'} is not a supported system action.",
+            )
+        try:
+            controller = PlatformFactory.get_system_controller()
+            result = controller.run(action, dry_run=False)
+        except Exception as exc:  # noqa: BLE001
+            return _native_failure(
+                action_type="system_control",
+                target=action.value,
+                reason=f"Could not run {action.value}: {exc}",
+            )
+        if result.success:
+            return _native_success(
+                action_type="system_control",
+                target=action.value,
+                message=result.message,
+            )
+        return _native_failure(
+            action_type="system_control",
+            target=action.value,
+            reason=result.message,
+        )
 
     @staticmethod
     def _resolve_url(target: str) -> str:

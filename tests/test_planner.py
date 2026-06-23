@@ -186,6 +186,33 @@ def test_screen_question_plans_screenshot_action():
     assert "vision_prompt" in plan.actions[0].parameters
 
 
+def test_plans_volume_up_as_low_risk_system_control():
+    plan = create_action_plan("Eclipse, subí el volumen")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.SYSTEM_CONTROL
+    assert action.tool_name == "native.system_control"
+    assert action.parameters["system_action"] == "volume_up"
+    assert action.risk_level is RiskLevel.LOW
+
+
+def test_plans_pause_as_media_play_pause():
+    plan = create_action_plan("Eclipse, pausá la música")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.SYSTEM_CONTROL
+    assert action.parameters["system_action"] == "media_play_pause"
+
+
+def test_plans_lock_screen_as_medium_risk():
+    plan = create_action_plan("Eclipse, bloqueá la pantalla")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.SYSTEM_CONTROL
+    assert action.parameters["system_action"] == "lock"
+    assert action.risk_level is RiskLevel.MEDIUM
+
+
 def test_coding_agent_action_requires_confirmation():
     plan = create_action_plan("Abre Cloud Code y desarrolla una landing")
 

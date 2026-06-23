@@ -102,6 +102,7 @@ class ActionKind(StrEnum):
     MCP_TOOL = "mcp_tool"
     SCREENSHOT = "screenshot"
     NATIVE_INPUT = "native_input"
+    SYSTEM_CONTROL = "system_control"
     UNKNOWN = "unknown"
 
 
@@ -690,6 +691,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if coding_action:
         return (coding_action,)
 
+    system_action = _maybe_system_control_action(clause, lowered, start_index)
+    if system_action:
+        return (system_action,)
+
     media_action = _maybe_media_action(clause, lowered, start_index)
     if media_action:
         return (media_action,)
@@ -904,6 +909,56 @@ def _maybe_coding_agent_action(clause: str, lowered: str, index: int) -> Planned
                 parameters={"command": " ".join(resolved.command), "request": clause},
                 tool_name="coding.open_agent",
             )
+    return None
+
+
+def _maybe_system_control_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    action = _match_system_action(lowered)
+    if action is None:
+        return None
+    risk = RiskLevel.MEDIUM if action == "lock" else RiskLevel.LOW
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.SYSTEM_CONTROL,
+        description="Control system volume, media playback, lock, or battery.",
+        risk_level=risk,
+        target=action,
+        parameters={"system_action": action},
+        tool_name="native.system_control",
+    )
+
+
+def _match_system_action(lowered: str) -> str | None:
+    """Map a spoken phrase to a system-control action value, or None."""
+
+    if "volumen" in lowered or "volume" in lowered:
+        if any(token in lowered for token in ("sub", "más", "mas", "aument", "up", "louder")):
+            return "volume_up"
+        if any(token in lowered for token in ("baj", "menos", "down", "reduc", "lower")):
+            return "volume_down"
+    if any(token in lowered for token in ("silenci", "mute", "mutea", "muteá")):
+        return "mute"
+    if any(
+        token in lowered
+        for token in ("siguiente canción", "próxima canción", "proxima canción",
+                      "siguiente tema", "next track", "next song", "skip")
+    ):
+        return "media_next"
+    if any(
+        token in lowered
+        for token in ("canción anterior", "tema anterior", "previous track",
+                      "previous song", "canción previa")
+    ):
+        return "media_previous"
+    if any(
+        token in lowered
+        for token in ("pausa", "pausá", "pausar", "reanud", "resume", "pause", "play/pause")
+    ):
+        return "media_play_pause"
+    if any(token in lowered for token in ("bloque", "lock screen", "lock the", "lockear")):
+        return "lock"
+    if any(token in lowered for token in ("batería", "bateria", "battery")):
+        return "battery"
     return None
 
 
