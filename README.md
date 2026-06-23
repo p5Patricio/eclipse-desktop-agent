@@ -1,271 +1,191 @@
 # Eclipse Desktop Agent
 
-Eclipse es un asistente personal de escritorio, siempre disponible en segundo plano, capaz de escuchar una frase de activación local, observar eventos del sistema, entender contexto, preparar acciones, pedir confirmación y ejecutar tareas reales con seguridad.
+Eclipse es un **asistente personal de escritorio para Windows**, estilo Jarvis: vive en
+segundo plano, despierta con una palabra de activación, entiende lo que le pedís, prepara
+acciones, te pide confirmación cuando hace falta y las ejecuta de forma segura — además de
+hablarte de vuelta.
 
-> Objetivo: Eclipse debe sentirse como un asistente tipo Jarvis/Alexa: permanece activo como daemon local, despierta cuando digas **"Eclipse"**, puede avisarte proactivamente de eventos permitidos y actúa como copiloto confiable.
+> Solo Windows. Toda la voz (wake word + transcripción + síntesis) corre **localmente** en
+> tu máquina. El razonamiento puede usar un modelo **local** (Ollama) o un proveedor en la
+> nube **barato** (DeepSeek), según prefieras privacidad o simplicidad.
 
-## Latest operational upgrades
+## Principios
 
-Eclipse now includes two production-oriented improvements:
-
-### Wake word fallback and optional "Eclipse" customization
-
-The safe default wake word is the builtin openwakeword model `hey_jarvis`.
-Do not replace it automatically with `models/eclipse.onnx`: the custom model
-must pass evaluation first.
-
-To try a trained custom model, place it at:
-
-```txt
-models/eclipse.onnx
-```
-
-Generate a candidate with:
-
-```bash
-python scripts/generate_wakeword.py --dry-run
-python scripts/generate_wakeword.py
-```
-
-The generator writes a training config under `.wakeword-training/eclipse/` and
-delegates to `openwakeword.train`. It requires the usual training assets:
-
-- a Piper sample generator checkout,
-- background audio clips,
-- room impulse response clips,
-- a false-positive validation `.npy` file,
-- precomputed openwakeword feature files for training.
-
-`OpenWakeWordTrigger` keeps `hey_jarvis` available by default. Missing or weak
-custom models fall back visibly instead of breaking startup.
-
-Start the known-good wake-efficient runtime with:
-
-```bash
-scripts/start_eclipse.sh
-```
-
-Useful overrides:
-
-```bash
-ECLIPSE_WAKEWORD_MODEL=/absolute/path/to/models/eclipse.onnx scripts/start_eclipse.sh
-ECLIPSE_WAKE_THRESHOLD=0.6 ECLIPSE_WHISPER_MODEL=small scripts/start_eclipse.sh
-ECLIPSE_START_DRY_RUN=1 scripts/start_eclipse.sh
-```
-
-### Dynamic screenshot vision routing
-
-Eclipse can now analyze screenshots through a local vision model only when
-vision is required. Text planning continues to use `qwen2.5:7b`, but screenshot
-actions dynamically request `qwen2.5vl:7b` through Ollama's OpenAI-compatible
-endpoint.
-
-When a screenshot action returns an image path, Eclipse:
-
-1. reads the image from disk,
-2. base64-encodes it,
-3. sends an OpenAI-compatible multimodal payload,
-4. requests `qwen2.5vl:7b` only for that call.
-
-If the vision model is missing, Eclipse returns a clear error message and tells
-you to pull it with:
-
-```bash
-ollama pull qwen2.5vl:7b
-```
-
-The setup script now pulls both the text and vision models automatically.
-
-## Quick path
-
-1. Leer [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) para entender el plan por fases.
-2. Revisar [`docs/MODEL_AND_VOICE_STRATEGY.md`](docs/MODEL_AND_VOICE_STRATEGY.md) para mantener Eclipse free-first.
-3. Revisar [`docs/SECURITY.md`](docs/SECURITY.md) antes de implementar automatización real.
-4. Usar [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) como guía técnica.
-5. Revisar [`docs/ALWAYS_ON_RUNTIME.md`](docs/ALWAYS_ON_RUNTIME.md) para activación y recursos.
-6. Revisar [`docs/MULTI_ACTION_ORCHESTRATION.md`](docs/MULTI_ACTION_ORCHESTRATION.md) para instrucciones con varias acciones.
-7. Revisar [`docs/TOOL_ROUTER_AND_DESKTOP_LAUNCHER.md`](docs/TOOL_ROUTER_AND_DESKTOP_LAUNCHER.md) para ruteo de tools y apps `.desktop`.
-8. Revisar [`docs/BROWSER_AUTOMATION_ADAPTER.md`](docs/BROWSER_AUTOMATION_ADAPTER.md) para la integración inicial con `agent-browser`.
-9. Revisar [`docs/CAPABILITY_ROADMAP.md`](docs/CAPABILITY_ROADMAP.md) para funciones pendientes.
-10. Revisar [`docs/VOICE_AND_NATIVE_CONTROL.md`](docs/VOICE_AND_NATIVE_CONTROL.md) para voz local y control Fedora/KDE.
-11. Revisar [`docs/NOTIFICATIONS_AND_DESKTOP_CONTROL.md`](docs/NOTIFICATIONS_AND_DESKTOP_CONTROL.md) para el flujo de notificaciones y apps nativas en Fedora/KDE.
-12. Revisar [`docs/CODING_AGENT_BRIDGE.md`](docs/CODING_AGENT_BRIDGE.md) para Claude Code/Gemini/Codex.
-13. Evaluar [`docs/AGENT_BROWSER_EVALUATION.md`](docs/AGENT_BROWSER_EVALUATION.md) para automatización web.
-14. Evaluar OpenClaw con [`docs/OPENCLAW_STRATEGY.md`](docs/OPENCLAW_STRATEGY.md), sin convertirlo todavía en dependencia crítica.
-15. Use [`scripts/start_eclipse.sh`](scripts/start_eclipse.sh) for the known-good efficient wake command; keep `hey_jarvis` active until a custom model passes evaluation.
-16. Run [`scripts/setup_local_llm.sh`](scripts/setup_local_llm.sh) to install Ollama and pull both `qwen2.5:7b` and `qwen2.5vl:7b`.
-
-## Principios del proyecto
-
-| Principio | Decisión |
+| Principio | Qué significa |
 |---|---|
-| Local-first | Eclipse debe correr principalmente en la computadora del usuario. |
-| Always-on responsable | El daemon puede estar activo, pero no debe transcribir todo 24/7 por defecto. |
-| Safety-first | Acciones sensibles requieren confirmación humana. |
-| Draft-first | Al inicio Eclipse prepara borradores; no envía ni modifica sin permiso. |
-| Provider-agnostic | OpenAI, Claude, Gemini y modelos locales deben poder intercambiarse. |
-| Auditabilidad | Toda acción importante debe quedar registrada. |
-| Plugins controlados | Las capacidades se agregan por herramientas con permisos explícitos. |
-| Wake-word fallback | Eclipse uses builtin `hey_jarvis` safely until a custom `eclipse.onnx` passes evaluation. |
-| Vision on demand | Screenshot analysis should load the vision model only when visual input is required. |
+| **Voz local** | Wake word (openwakeword), transcripción (faster-whisper) y síntesis (SAPI de Windows) corren en tu máquina. |
+| **Provider-agnostic** | El planificador funciona con Ollama (local), DeepSeek o OpenAI cambiando un valor de config. |
+| **Safety-first** | Las acciones sensibles requieren confirmación humana explícita. |
+| **Draft-first** | Por defecto Eclipse prepara borradores; no envía ni modifica sin permiso. |
+| **Auditable** | Las notificaciones y acciones quedan registradas localmente en SQLite. |
+| **Privacidad de pantalla** | Las capturas se analizan con un modelo de visión local y se redactan ventanas sensibles (bancos, gestores de contraseñas) antes de procesarlas. |
 
-## Alcance inicial
+## Requisitos
 
-El MVP no busca autonomía total. Busca demostrar este flujo:
+- **Windows 10/11**
+- **Python 3.11+** (probado en 3.14)
+- Opcional: [Ollama](https://ollama.com/) si querés el modelo local; una API key de
+  [DeepSeek](https://platform.deepseek.com/) si preferís la nube.
+
+## Instalación
+
+Setup en un comando (crea el entorno virtual e instala todo):
+
+```bat
+scripts\setup.bat
+```
+
+O manualmente:
+
+```bat
+py -m venv .venv
+.venv\Scripts\python -m pip install -e ".[voice,dev]"
+```
+
+Extras opcionales:
+
+```bat
+:: Escucha real de notificaciones de Windows
+.venv\Scripts\python -m pip install -e ".[notifications]"
+
+:: Automatización web (CLI externa de Node)
+npm install -g agent-browser
+```
+
+Verificá qué capacidades están disponibles:
+
+```bat
+.venv\Scripts\eclipse-agent diagnostics
+```
+
+## Configuración
+
+Eclipse carga automáticamente un archivo `.env` de la raíz del proyecto al arrancar.
+Creá uno con tu configuración de proveedor:
+
+```ini
+# Proveedor del planificador: ollama (local, por defecto), deepseek o openai
+ECLIPSE_LLM_PROVIDER=ollama
+
+# Requerido si usás DeepSeek
+DEEPSEEK_API_KEY=
+
+# Requerido si usás OpenAI
+OPENAI_API_KEY=
+
+# Overrides avanzados (opcionales) sobre el preset del proveedor
+# ECLIPSE_LLM_BASE_URL=
+# ECLIPSE_LLM_MODEL=
+
+# Visión de pantalla (se mantiene local: DeepSeek no tiene modelo multimodal)
+# ECLIPSE_VISION_MODEL=qwen2.5vl:7b
+
+# Voz y wake word
+# ECLIPSE_WHISPER_MODEL=small
+# ECLIPSE_WAKE_THRESHOLD=0.5
+# ECLIPSE_BUILTIN_WAKEWORD=hey_jarvis
+```
+
+También podés elegir el proveedor por línea de comandos en cada invocación con
+`--provider {ollama,deepseek,openai}`.
+
+> **Visión:** el análisis de pantalla usa un modelo multimodal local (`qwen2.5vl` vía
+> Ollama). DeepSeek no expone visión, así que esa función permanece local aunque uses
+> DeepSeek para el texto.
+
+## Uso
+
+Arrancá el daemon de wake word (palabra de activación `hey_jarvis` por defecto hasta que
+entrenes un modelo `Eclipse` propio):
+
+```bat
+scripts\start_eclipse.bat
+```
+
+O usá la CLI directamente (con el venv activo, o vía `.venv\Scripts\eclipse-agent`):
+
+```bat
+:: Estado y diagnóstico
+eclipse-agent status
+eclipse-agent diagnostics
+
+:: Voz
+eclipse-agent say --text "Hola, soy Eclipse." --execute
+eclipse-agent listen --seconds 4 --execute
+eclipse-agent wake-loop --iterations 1 --execute
+
+:: Comando ya transcrito (sin micrófono)
+eclipse-agent wake-command --text "Eclipse, abre Instagram en el navegador"
+
+:: Planificación y ruteo de acciones
+eclipse-agent plan --instruction "Reproduce El lado oscuro en YouTube Music y abre Instagram"
+eclipse-agent route-plan --provider deepseek --instruction "¿Qué hay en mi pantalla?"
+
+:: Control de escritorio (Windows)
+eclipse-agent open-app --app "Notepad"
+eclipse-agent list-windows
+eclipse-agent screenshot --output captura.png --execute
+eclipse-agent type-text --text "hola" --confirmed
+
+:: Notificaciones
+eclipse-agent notifications-mode --mode game --minutes 60
+eclipse-agent notifications-summary --mark-announced
+eclipse-agent notifications-listen --seconds 30
+
+:: Bridge a agentes de código (Claude Code / Gemini / Codex)
+eclipse-agent coding-prompt --agent "Claude Code" --project C:\ruta --idea "Implementa..."
+```
+
+El flujo objetivo es:
 
 ```txt
-Always-on daemon
-  -> wake word local / eventos permitidos
-  -> transcripción
-  -> análisis de pantalla
-  -> razonamiento del agente
+daemon always-on
+  -> wake word local
+  -> transcripción local
+  -> (visión de pantalla si hace falta)
+  -> razonamiento del agente (local o DeepSeek)
   -> acción segura o borrador
   -> confirmación humana
   -> respuesta hablada
-  -> memoria/log
+  -> memoria / log
 ```
 
-## Estructura inicial
+## Capacidades
 
-```txt
-src/eclipse_agent/          Núcleo Python inicial
-  activation.py             Política de activación always-on/wake-word
-  browser_automation.py     Adapter inicial para agent-browser
-  coding_agents.py          Registro y prompt contract para Claude/Gemini/Codex
-  desktop_apps.py           Descubrimiento y lanzamiento seguro de apps .desktop
-  fedora_control.py         Scaffold de control nativo Fedora/KDE
-  main.py                   CLI placeholder para validar el paquete
-  notifications.py          Core de notificaciones, reglas foco/juego y SQLite
-  planner.py                Descomposición de instrucciones multi-acción
-  models/                   Wake-word models generated locally (e.g. eclipse.onnx)
-  resources.py              Estimaciones de recursos por modo de activación
-  runtime_diagnostics.py    Diagnósticos de dependencias locales
-  config.py                 Configuración base
-  safety.py                 Modelo inicial de política de seguridad
-  tool_router.py            Ruteo de acciones planeadas a tools locales
-  voice.py                  TTS local y facade STT
-  wake_runtime.py           Loop wake/listen/respond acotado para pruebas reales
-docs/                       Plan, arquitectura, seguridad y OpenClaw
-  adr/                      Decisiones arquitectónicas
-scripts/                    Helpers de setup y generación local de modelos
+- **Wake word** local con openwakeword (`hey_jarvis` por defecto; soporta un modelo
+  `Eclipse` propio entrenable, con fallback seguro mientras no pase evaluación).
+- **Transcripción** local con faster-whisper.
+- **Síntesis de voz** con SAPI de Windows.
+- **Notificaciones**: captura, reglas de foco/juego/privado, resúmenes y borradores de
+  respuesta, persistidas en SQLite.
+- **Control de escritorio**: lanzar apps, listar ventanas, capturas de pantalla y tipeo
+  nativo, a través de una capa de abstracción de plataforma (PAL) de Windows.
+- **Automatización web** opcional vía `agent-browser`.
+- **Visión** de pantalla bajo demanda con un modelo multimodal local.
+- **Planificador híbrido**: reglas deterministas rápidas + capa LLM (local o DeepSeek) para
+  instrucciones complejas.
+- **Seguridad**: draft-first, confirmaciones para acciones sensibles y redacción de
+  ventanas sensibles en capturas.
+
+## Almacenamiento local
+
+Eclipse guarda su estado bajo `%LOCALAPPDATA%\eclipse-agent\` (notificaciones y telemetría
+en SQLite).
+
+## Arquitectura
+
+Eclipse usa una **capa de abstracción de plataforma (PAL)** para todo lo nativo de Windows
+(ventanas, input, captura, lanzador, notificaciones, voz, daemon), un **planificador
+provider-agnostic** y un **router de herramientas** con gates de seguridad. Ver
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) para el detalle técnico y
+[`docs/SECURITY.md`](docs/SECURITY.md) para el modelo de seguridad.
+
+## Desarrollo
+
+```bat
+.venv\Scripts\python -m pytest      :: tests
+.venv\Scripts\python -m ruff check src tests   :: lint
 ```
-
-## Estado
-
-Proyecto entrando a fase **1: daemon always-on + voz mínima**.
-The current implementation also supports:
-
-- custom wake-word training/evaluation for `Eclipse` with `hey_jarvis` fallback,
-- dynamic screenshot routing to a local vision model,
-- Wayland-native capture and typing scaffolding,
-- local Ollama text + vision setup.
-
-## CLI inicial
-
-```bash
-PYTHONPATH=src python -m eclipse_agent status
-PYTHONPATH=src python -m eclipse_agent diagnostics
-PYTHONPATH=src python -m eclipse_agent smoke-plan
-PYTHONPATH=src python -m eclipse_agent smoke-simulate
-PYTHONPATH=src python -m eclipse_agent say --text "Hola, soy Eclipse."
-PYTHONPATH=src venv/bin/python -m eclipse_agent listen --seconds 3
-PYTHONPATH=src venv/bin/python -m eclipse_agent wake-command \
-  --text "Eclipse, dime qué llegó"
-PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop --iterations 1
-PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop \
-  --iterations 1 \
-  --execute
-PYTHONPATH=src python scripts/generate_wakeword.py --dry-run
-PYTHONPATH=src python scripts/generate_wakeword.py
-scripts/start_eclipse.sh
-PYTHONPATH=src python -m eclipse_agent resource-plan
-PYTHONPATH=src python -m eclipse_agent plan \
-  --instruction "Reproduce El lado oscuro en YouTube Music, también abre Instagram"
-PYTHONPATH=src python -m eclipse_agent route-plan \
-  --instruction "Reproduce El lado oscuro en YouTube Music, también abre Instagram"
-PYTHONPATH=src python -m eclipse_agent plan \
-  --instruction "What is on my screen?"
-PYTHONPATH=src python -m eclipse_agent route-plan \
-  --instruction "What is on my screen?"
-PYTHONPATH=src python -m eclipse_agent browser-snapshot --url https://example.com
-PYTHONPATH=src python -m eclipse_agent browser-action \
-  --kind fill \
-  --selector @e2 \
-  --text "mensaje borrador" \
-  --confirmed
-PYTHONPATH=src python -m eclipse_agent fedora-open --app "YouTube Music"
-PYTHONPATH=src python -m eclipse_agent coding-prompt \
-  --agent "Claude Code" \
-  --project /ruta/al/proyecto \
-  --idea "Implementa esta idea..."
-PYTHONPATH=src python -m eclipse_agent notifications-mode --mode game --minutes 60
-PYTHONPATH=src python -m eclipse_agent notifications-mute --app Instagram --app Messenger
-PYTHONPATH=src python -m eclipse_agent notifications-ingest \
-  --app "Google Chrome" \
-  --summary "Instagram" \
-  --body "Nuevo mensaje" \
-  --source-window "Instagram - Google Chrome"
-PYTHONPATH=src python -m eclipse_agent notifications-summary --mark-announced
-PYTHONPATH=src python -m eclipse_agent notifications-dbus-command
-PYTHONPATH=src python -m eclipse_agent notifications-listen --seconds 30
-PYTHONPATH=src python -m eclipse_agent notifications-intent \
-  --text "Eclipse, modo juego por una hora"
-PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
-  --event-id EVENT_ID \
-  --message "Ahorita entro"
-PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
-  --event-id EVENT_ID \
-  --audio-path /tmp/eclipse-reply.wav
-PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
-  --event-id EVENT_ID \
-  --record-seconds 4 \
-  --record-audio-path /tmp/eclipse-reply.wav
-PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
-  --event-id EVENT_ID \
-  --message "Ahorita entro" \
-  --snapshot-json /tmp/instagram-snapshot.json \
-  --auto-select \
-  --confirmed
-PYTHONPATH=src python -m eclipse_agent notifications-service --action render
-PYTHONPATH=src python -m eclipse_agent notifications-service --action install
-PYTHONPATH=src python -m eclipse_agent notifications-mark \
-  --event-id EVENT_ID \
-  --status replied \
-  --confirmed
-```
-
-## Environment variables
-
-The following environment variables are useful for local setup:
-
-```bash
-ECLIPSE_LOCAL_LLM_MODEL=qwen2.5:7b
-ECLIPSE_LOCAL_VISION_MODEL=qwen2.5vl:7b
-ECLIPSE_LLM_BASE_URL=http://localhost:11434/v1
-ECLIPSE_LLM_API_KEY=ollama
-ECLIPSE_VISION_MODEL=qwen2.5vl:7b
-ECLIPSE_WAKEWORD_MODEL=/absolute/path/to/models/eclipse.onnx
-ECLIPSE_WAKE_THRESHOLD=0.5
-ECLIPSE_WHISPER_MODEL=small
-ECLIPSE_START_DRY_RUN=1
-ECLIPSE_WAKEWORD_MODEL_PATH=/absolute/path/to/models/eclipse.onnx  # legacy model path helper
-ECLIPSE_MODELS_DIR=/absolute/path/to/models
-```
-
-## Recommended setup flow
-
-1. Install Ollama and pull local models:
-   ```bash
-   bash scripts/setup_local_llm.sh
-   ```
-2. Optionally generate and evaluate a custom wake-word model:
-   ```bash
-   python scripts/generate_wakeword.py --dry-run
-   ```
-3. Run Eclipse with efficient wake mode:
-   ```bash
-   scripts/start_eclipse.sh
-   ```
 
 ## Licencia
 

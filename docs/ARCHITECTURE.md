@@ -1,164 +1,125 @@
 # Arquitectura de Eclipse
 
-Eclipse será un asistente desktop modular. El núcleo no debe depender de un solo proveedor de modelos ni de una sola herramienta de automatización.
+Eclipse es un asistente de escritorio modular para **Windows**. El núcleo no depende de un
+solo proveedor de modelos ni de una sola herramienta de automatización: la voz corre
+local, y el razonamiento se rutea a un proveedor configurable.
 
 ## Diagrama lógico
 
 ```txt
 Input Layer
-  - always-on daemon
-  - wake word local
-  - push-to-talk fallback
-  - desktop notifications
-  - focus/game mode
-  - screen capture
+  - daemon always-on
+  - wake word local (openwakeword)
+  - notificaciones de Windows
+  - modos de foco/juego
+  - captura de pantalla
         |
         v
 Perception Layer
-  - speech-to-text
-  - screen understanding
-  - notification parser
-  - privacy filter
+  - speech-to-text (faster-whisper)
+  - análisis de pantalla (visión local)
+  - parser de notificaciones
+  - filtro de privacidad (redacción de ventanas sensibles)
         |
         v
 Agent Orchestrator
-  - intent routing
-  - multi-action planner
-  - context assembly
-  - planning
-  - safety checks
-  - cost policy
-  - notification rules
+  - clasificación de intención
+  - planificador híbrido (determinista + LLM)
+  - chequeos de seguridad
+  - reglas de notificaciones
         |
         v
 Tool Executor
-  - tool router
-  - browser automation
-  - coding-agent bridge
-  - desktop automation
-  - files/tools
-  - OpenClaw bridge
+  - tool router (nativo + MCP)
+  - automatización de navegador
+  - bridge a agentes de código
+  - control de escritorio (PAL de Windows)
         |
         v
 Verification + Response
-  - screenshot/result validation
-  - TTS
-  - logs
-  - memory
+  - validación de resultado/captura
+  - TTS (SAPI)
+  - logs / memoria (SQLite)
 ```
 
 ## Módulos principales
 
-| Módulo | Responsabilidad | Primera implementación |
-|---|---|---|
-| `activation` | Daemon, wake word, push-to-talk fallback | Always-on responsable sin STT continuo |
-| `voice` | STT/TTS/realtime | `SystemTTS` + `LocalWhisperSTT` facade |
-| `vision` | Capturas y análisis de pantalla | Screenshot opt-in |
-| `planner` | Divide instrucciones compuestas en acciones | `ActionPlan` determinístico inicial |
-| `agent` | Razonamiento y tool calling | Orchestrator simple |
-| `tool_router` | Convierte `PlannedAction` en tools concretas | Dry-run + safety gates |
-| `browser_automation` | Abre/busca/snapshot en navegador controlado | `AgentBrowserAdapter` dry-run |
-| `desktop_apps` | Descubre/lanza apps `.desktop` | `DesktopAppLauncher` |
-| `fedora_control` | Control nativo Fedora/KDE | Apertura app + KWin/AT-SPI scaffold |
-| `runtime_diagnostics` | Estado de dependencias locales | CLI diagnostics |
-| `tools` | Registro y ejecución de herramientas | Allowlist + confirmaciones |
-| `automation` | Navegador/escritorio | `agent-browser` para web; Playwright fallback |
-| `coding_agents` | Abrir Claude Code/Gemini/Codex con prompts seguros | Registry + prompt builder |
-| `memory` | Recordatorios, notificaciones y contexto | SQLite local |
-| `safety` | Políticas, permisos, costo, notificaciones y auditoría | Rules engine simple |
-| `openclaw_bridge` | Integración opcional con OpenClaw | Adapter experimental |
-
-## Decisiones iniciales
-
-| Tema | Decisión |
+| Módulo | Responsabilidad |
 |---|---|
-| Lenguaje base | Python para MVP por velocidad e integración; TypeScript posible para UI/realtime; Rust/Go solo si hace falta daemon endurecido. |
-| Automatización web | Evaluar `agent-browser` primero por snapshots de accesibilidad y refs semánticas; Playwright queda como fallback. |
-| Automatización desktop | En Fedora KDE Wayland: D-Bus/API/AT-SPI/KWin primero; `ydotool` solo como último recurso. |
-| Memoria | SQLite local al inicio. |
-| Voz | Free-first: Whisper local para STT y TTS local simple; MiniMax/OpenAI opcionales. |
-| Activación | Always-on daemon + wake-word local por defecto; push-to-talk queda como fallback; STT continuo se evita en MVP. |
-| Seguridad | Confirmación obligatoria para acciones de impacto. |
+| `activation` | Política de daemon always-on y wake word |
+| `voice` | STT (faster-whisper), TTS y wake-word trigger |
+| `wake_runtime` | Loop wake → escuchar → razonar → responder |
+| `planner` | Divide instrucciones compuestas en acciones; provider-agnostic |
+| `tool_router` | Convierte `PlannedAction` en tools concretas con gates de seguridad |
+| `browser_automation` | Abre/busca/snapshot en navegador vía `agent-browser` |
+| `coding_agents` | Prepara prompts y abre Claude Code / Gemini / Codex |
+| `notifications` | Captura, reglas de foco, resúmenes y borradores (SQLite) |
+| `desktop_control` | Tipos de resultado neutrales para control de escritorio |
+| `pal/` | **Platform Abstraction Layer** de Windows: ventanas, input, captura, lanzador, notificaciones, voz, daemon |
+| `safety/` | Política de riesgo y redacción de capturas |
+| `runtime_diagnostics` | Estado de dependencias locales (CLI `diagnostics`) |
+| `telemetry` | Métricas de la capa de planificación (SQLite) |
+
+## Platform Abstraction Layer (PAL)
+
+Todo lo nativo de Windows pasa por interfaces en `pal/base.py`
+(`WindowManager`, `InputSynthesizer`, `ScreenCapture`, `AppLauncher`,
+`NotificationDaemon`, `TTSProvider`, `AudioRecorder`, `DaemonManager`).
+`PlatformFactory` construye las implementaciones de `pal/windows/`. Esto mantiene el resto
+del código desacoplado de detalles de plataforma y testeable por inyección de dependencias.
+
+## Planificador y proveedores
+
+El `HybridPlanner` usa primero reglas deterministas rápidas y cae a una capa LLM solo para
+instrucciones que no reconoce. La capa LLM es **provider-agnostic**: DeepSeek, Ollama y
+OpenAI hablan la misma API OpenAI-compatible, así que un proveedor es solo un preset de
+datos (`LLMProvider`), no una jerarquía de clases.
+
+| Proveedor | Endpoint | Structured output | Visión |
+|---|---|---|---|
+| `ollama` (default) | local | json_schema estricto | sí |
+| `deepseek` | api.deepseek.com | json_object + schema en prompt | no |
+| `openai` | api.openai.com | json_schema estricto | sí |
+
+Se elige con `--provider` o `ECLIPSE_LLM_PROVIDER`. La visión de pantalla se mantiene local
+(qwen2.5vl) porque DeepSeek no expone un modelo multimodal.
 
 ## Loop de ejecución
 
-1. Recibir evento: wake word, texto, notificación o comando.
+1. Recibir evento: wake word, texto o notificación.
 2. Si es notificación, aplicar reglas de foco/silencio antes de hablar.
-3. Construir contexto mínimo necesario.
-4. Clasificar intención y dividir instrucciones compuestas en `PlannedAction`.
-5. Decidir si necesita observar pantalla.
-6. Proponer plan de herramientas y grupos paralelos/dependientes.
-7. Rutear cada acción a una tool concreta.
-8. Evaluar política de seguridad y costo.
-9. Ejecutar herramienta o pedir confirmación.
-10. Verificar resultado.
-11. Responder por voz/texto.
-12. Registrar evento y memoria permitida.
-
-## Interfaces internas sugeridas
-
-```python
-class Tool:
-    name: str
-    risk_level: str
-    requires_confirmation: bool
-
-    async def run(self, input, context): ...
-
-class SafetyPolicy:
-    async def evaluate(self, plan, context): ...
-
-class ProviderAdapter:
-    async def respond(self, messages, tools=None): ...
-```
+3. Clasificar intención y dividir instrucciones compuestas en `PlannedAction`.
+4. Decidir si necesita observar la pantalla.
+5. Rutear cada acción a una tool concreta.
+6. Evaluar la política de seguridad.
+7. Ejecutar la herramienta o pedir confirmación.
+8. Verificar el resultado.
+9. Responder por voz/texto.
+10. Registrar el evento y la memoria permitida.
 
 ## Modos de operación
 
 | Modo | Qué permite |
 |---|---|
-| Observe | Solo ve/resume. No actúa. |
-| Draft | Prepara texto o pasos. No confirma. |
-| Copilot | Ejecuta acciones reversibles y pide confirmación en acciones sensibles. |
-| Autonomous | Solo para tareas allowlist de bajo riesgo. No usar al inicio. |
+| `observe` | Solo ve/resume. No actúa. |
+| `draft` | Prepara texto o pasos. No confirma. |
+| `copilot` | Ejecuta acciones reversibles y pide confirmación en las sensibles. |
+| `autonomous` | Solo para tareas allowlist de bajo riesgo. No usar al inicio. |
+
+## Seguridad
+
+- **Draft-first**: por defecto se preparan borradores, no se ejecuta.
+- **Confirmación obligatoria** para acciones de impacto (input nativo, mensajes, agentes de
+  código, borrado).
+- **Redacción de pantalla**: las ventanas sensibles (bancos, gestores de contraseñas) se
+  difuminan antes de analizar una captura.
+
+Ver [`SECURITY.md`](SECURITY.md) para el detalle del modelo de seguridad.
 
 ## Agentes de codificación
 
-Eclipse debe poder abrir un agente de programación externo solo bajo un flujo supervisado:
-
-```txt
-Idea dictada por el usuario
-  -> Eclipse construye prompt estructurado
-  -> pide confirmación de agente + proyecto + prompt
-  -> abre Claude Code/Gemini/Codex en el proyecto
-  -> monitorea y permite cerrar/detener
-```
-
-Primeros agentes:
-
-| Agente | Alias de voz | Riesgo |
-|---|---|---|
-| Claude Code | “Claude Code”, “Cloud Code” | Alto |
-| Gemini CLI | “Gemini”, “Hemini” | Alto |
-| Codex CLI | “Codex” | Alto |
-
-Razonamiento de riesgo: estos agentes pueden modificar código, instalar dependencias o ejecutar comandos. Eclipse puede preparar prompts y abrirlos, pero debe pedir confirmación para acciones destructivas, instalaciones, migraciones, commits o despliegues.
-
-## Provider router y costo
-
-Eclipse debe rutear modelos según costo y privacidad:
-
-| Modo | Regla |
-|---|---|
-| `free` | Solo STT/TTS/modelos/herramientas locales. |
-| `budget` | Permite MiniMax con cuotas/límites diarios. |
-| `premium` | Permite OpenAI/Claude/Gemini solo cuando el usuario lo active. |
-
-El MVP debe funcionar en modo `free`.
-
-## Dependencias externas opcionales
-
-- `agent-browser`: automatización web para agentes con refs semánticas.
-- OpenClaw: gateway/canales/plugins.
-- MCP servers: herramientas estandarizadas.
-- Model providers: MiniMax, OpenAI, Anthropic, Gemini, local.
-- Screen/memory tools: evaluar alternativas local-first.
+Eclipse puede abrir un agente de programación externo solo bajo un flujo supervisado: el
+usuario dicta una idea, Eclipse construye un prompt estructurado, pide confirmación de
+agente + proyecto + prompt, y abre Claude Code / Gemini CLI / Codex CLI. Estos agentes son
+de **riesgo alto** (pueden modificar código, instalar dependencias o ejecutar comandos), así
+que toda acción destructiva requiere confirmación.
