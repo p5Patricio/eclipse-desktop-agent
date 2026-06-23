@@ -17,6 +17,7 @@ from eclipse_agent.pal.base import (
     InputSynthesizer,
     NotificationDaemon,
     ScreenCapture,
+    SystemController,
     TTSProvider,
     WindowManager,
 )
@@ -88,3 +89,10 @@ class PlatformFactory:
         from eclipse_agent.pal.windows.daemon import WindowsDaemonManager
 
         return WindowsDaemonManager()
+
+    @staticmethod
+    def get_system_controller() -> SystemController:
+        _require_windows()
+        from eclipse_agent.pal.windows.system_control import WindowsSystemController
+
+        return WindowsSystemController()

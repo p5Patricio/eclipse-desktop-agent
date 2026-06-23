@@ -29,6 +29,7 @@ from eclipse_agent.desktop_control import (
     DesktopControlResult,
     render_desktop_control_result,
 )
+from eclipse_agent.system_control import SystemAction, render_system_control_result
 from eclipse_agent.pal.factory import PlatformFactory
 from eclipse_agent.notification_intents import (
     execute_notification_voice_intent,
@@ -345,6 +346,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--execute",
         action="store_true",
         help="Actually type the text instead of preparing the command.",
+    )
+
+    system = subparsers.add_parser(
+        "system",
+        help="Run a system-control action: volume, media, lock, or battery.",
+    )
+    system.add_argument(
+        "--action",
+        required=True,
+        choices=[action.value for action in SystemAction],
+        help="System action to run.",
+    )
+    system.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually run the action instead of dry-running.",
+    )
+    system.add_argument(
+        "--confirmed",
+        action="store_true",
+        help="Required to execute disruptive actions such as lock.",
     )
 
     notifications_ingest = subparsers.add_parser(
@@ -992,6 +1014,17 @@ def _cmd_type_text(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _cmd_system(args: argparse.Namespace) -> int:
+    action = SystemAction(args.action)
+    if action is SystemAction.LOCK and args.execute and not args.confirmed:
+        print("Blocked: locking the workstation requires --confirmed.")
+        return 1
+    controller = PlatformFactory.get_system_controller()
+    result = controller.run(action, dry_run=not args.execute)
+    print(render_system_control_result(result))
+    return 0 if result.success else 1
+
+
 def _cmd_notifications_ingest(args: argparse.Namespace) -> int:
     store = _notification_store(args)
     event = create_notification_event(
@@ -1246,6 +1279,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "list-windows": _cmd_list_windows,
     "screenshot": _cmd_screenshot,
     "type-text": _cmd_type_text,
+    "system": _cmd_system,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

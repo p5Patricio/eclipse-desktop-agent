@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Iterable
 
+from eclipse_agent.system_control import SystemAction
+
 class WindowManager(ABC):
     @abstractmethod
     def list_windows(self) -> Any:
@@ -112,4 +114,10 @@ class DaemonManager(ABC):
     @abstractmethod
     def remove_autostart(self, name: str) -> Any:
         """Remove the autostart registration."""
+        pass
+
+class SystemController(ABC):
+    @abstractmethod
+    def run(self, action: SystemAction, *, dry_run: bool = True) -> Any:
+        """Run a system-control action (volume, media, lock, battery)."""
         pass
