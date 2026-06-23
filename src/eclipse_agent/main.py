@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from eclipse_agent import __version__
@@ -742,456 +743,522 @@ def _print_status(config: EclipseConfig) -> None:
     print("Next milestone: always-on daemon + local wake word + spoken response.")
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    config = _build_config(args)
+def _cmd_resource_plan(args: argparse.Namespace) -> int:
+    print(estimate_resource_profile(_build_config(args).activation_mode).render())
+    return 0
 
-    if args.command == "resource-plan":
-        print(estimate_resource_profile(config.activation_mode).render())
-        return 0
 
-    if args.command == "diagnostics":
-        print(collect_runtime_diagnostics().render())
-        return 0
+def _cmd_diagnostics(args: argparse.Namespace) -> int:
+    print(collect_runtime_diagnostics().render())
+    return 0
 
-    if args.command == "smoke-plan":
-        print(render_agent_smoke_plan(build_agent_smoke_plan(store_path=args.store)))
-        return 0
 
-    if args.command == "smoke-simulate":
-        store = args.store or str(Path(tempfile.gettempdir()) / "eclipse-smoke.sqlite3")
-        result = run_agent_smoke_simulation(store_path=store)
-        print(render_agent_smoke_simulation(result))
-        return 0 if result.success else 1
+def _cmd_smoke_plan(args: argparse.Namespace) -> int:
+    print(render_agent_smoke_plan(build_agent_smoke_plan(store_path=args.store)))
+    return 0
 
-    if args.command == "say":
-        print(render_speech_result(SystemTTS().speak(args.text, dry_run=not args.execute)))
-        return 0
 
-    if args.command == "listen-status":
-        status = LocalWhisperSTT().status()
-        marker = "ready" if status.available else "missing"
-        print(f"STT [{marker}] {status.provider}: {status.message}")
-        return 0
+def _cmd_smoke_simulate(args: argparse.Namespace) -> int:
+    store = args.store or str(Path(tempfile.gettempdir()) / "eclipse-smoke.sqlite3")
+    result = run_agent_smoke_simulation(store_path=store)
+    print(render_agent_smoke_simulation(result))
+    return 0 if result.success else 1
 
-    if args.command == "listen":
-        result = ListenOnce(stt=LocalWhisperSTT(model_name=args.model, language=args.language)).run(
-            seconds=args.seconds,
-            audio_path=args.audio_path,
-            dry_run=not args.execute,
-        )
-        print(render_listen_result(result))
-        return 0
 
-    if args.command == "transcribe-file":
-        result = LocalWhisperSTT(
-            model_name=args.model,
-            language=args.language,
-        ).transcribe_file(args.audio_path)
-        marker = "ok" if result.success else "failed"
-        print(f"STT [{marker}] {result.provider}: {result.message}")
-        print(f"text: {result.text}")
-        return 0
+def _cmd_say(args: argparse.Namespace) -> int:
+    print(render_speech_result(SystemTTS().speak(args.text, dry_run=not args.execute)))
+    return 0
 
-    if args.command == "wake-command":
-        result = WakeRuntime(store=_notification_store(args)).handle_command(
-            args.text,
-            speak=args.speak,
-            route_execute=args.route_execute,
-            confirmed=args.confirmed,
-            mark_announced=args.mark_announced,
-        )
-        print(render_wake_command_result(result))
-        return 0 if result.success else 1
 
-    if args.command == "wake-loop":
-        runtime = WakeRuntime(
-            listener=ListenOnce(
-                stt=LocalWhisperSTT(model_name=args.model, language=args.language),
-            ),
-            store=_notification_store(args),
-        )
-        result = runtime.run(
-            wake_phrase=args.wake_phrase,
-            iterations=args.iterations,
-            wake_seconds=args.wake_seconds,
-            command_seconds=args.command_seconds,
-            audio_dir=args.audio_dir,
-            dry_run=not args.execute,
-            speak=args.speak,
-            route_execute=args.route_execute,
-            confirmed=args.confirmed,
-            mark_announced=args.mark_announced,
-        )
-        print(render_wake_loop_result(result))
-        return 0 if result.success else 1
+def _cmd_listen_status(args: argparse.Namespace) -> int:
+    status = LocalWhisperSTT().status()
+    marker = "ready" if status.available else "missing"
+    print(f"STT [{marker}] {status.provider}: {status.message}")
+    return 0
 
-    if args.command == "wake-efficient":
-        runtime = WakeRuntime(
-            listener_factory=lambda: ListenOnce(
-                stt=LocalWhisperSTT(model_name=args.model, language=args.language),
-            ),
-            wake_trigger=OpenWakeWordTrigger(
-                model_paths=tuple(args.wakeword_model),
-                builtin_model=args.builtin_wakeword or None,
-                threshold=args.wake_threshold,
-            ),
-            store=_notification_store(args),
-        )
-        result = runtime.run_efficient(
-            iterations=args.iterations,
-            command_seconds=args.command_seconds,
-            audio_dir=args.audio_dir,
-            dry_run=not args.execute,
-            speak=args.speak,
-            route_execute=args.route_execute,
-            confirmed=args.confirmed,
-            mark_announced=args.mark_announced,
-            wake_timeout_seconds=args.wake_timeout_seconds,
-        )
-        print(render_efficient_wake_loop_result(result))
-        return 0 if result.success else 1
 
-    if args.command == "open-app":
-        launcher = PlatformFactory.get_app_launcher()
-        pal_result = launcher.launch(args.app, dry_run=not args.execute)
+def _cmd_listen(args: argparse.Namespace) -> int:
+    result = ListenOnce(stt=LocalWhisperSTT(model_name=args.model, language=args.language)).run(
+        seconds=args.seconds,
+        audio_path=args.audio_path,
+        dry_run=not args.execute,
+    )
+    print(render_listen_result(result))
+    return 0
+
+
+def _cmd_transcribe_file(args: argparse.Namespace) -> int:
+    result = LocalWhisperSTT(
+        model_name=args.model,
+        language=args.language,
+    ).transcribe_file(args.audio_path)
+    marker = "ok" if result.success else "failed"
+    print(f"STT [{marker}] {result.provider}: {result.message}")
+    print(f"text: {result.text}")
+    return 0
+
+
+def _cmd_wake_command(args: argparse.Namespace) -> int:
+    result = WakeRuntime(store=_notification_store(args)).handle_command(
+        args.text,
+        speak=args.speak,
+        route_execute=args.route_execute,
+        confirmed=args.confirmed,
+        mark_announced=args.mark_announced,
+    )
+    print(render_wake_command_result(result))
+    return 0 if result.success else 1
+
+
+def _cmd_wake_loop(args: argparse.Namespace) -> int:
+    runtime = WakeRuntime(
+        listener=ListenOnce(
+            stt=LocalWhisperSTT(model_name=args.model, language=args.language),
+        ),
+        store=_notification_store(args),
+    )
+    result = runtime.run(
+        wake_phrase=args.wake_phrase,
+        iterations=args.iterations,
+        wake_seconds=args.wake_seconds,
+        command_seconds=args.command_seconds,
+        audio_dir=args.audio_dir,
+        dry_run=not args.execute,
+        speak=args.speak,
+        route_execute=args.route_execute,
+        confirmed=args.confirmed,
+        mark_announced=args.mark_announced,
+    )
+    print(render_wake_loop_result(result))
+    return 0 if result.success else 1
+
+
+def _cmd_wake_efficient(args: argparse.Namespace) -> int:
+    runtime = WakeRuntime(
+        listener_factory=lambda: ListenOnce(
+            stt=LocalWhisperSTT(model_name=args.model, language=args.language),
+        ),
+        wake_trigger=OpenWakeWordTrigger(
+            model_paths=tuple(args.wakeword_model),
+            builtin_model=args.builtin_wakeword or None,
+            threshold=args.wake_threshold,
+        ),
+        store=_notification_store(args),
+    )
+    result = runtime.run_efficient(
+        iterations=args.iterations,
+        command_seconds=args.command_seconds,
+        audio_dir=args.audio_dir,
+        dry_run=not args.execute,
+        speak=args.speak,
+        route_execute=args.route_execute,
+        confirmed=args.confirmed,
+        mark_announced=args.mark_announced,
+        wake_timeout_seconds=args.wake_timeout_seconds,
+    )
+    print(render_efficient_wake_loop_result(result))
+    return 0 if result.success else 1
+
+
+def _cmd_open_app(args: argparse.Namespace) -> int:
+    launcher = PlatformFactory.get_app_launcher()
+    pal_result = launcher.launch(args.app, dry_run=not args.execute)
+    result = DesktopControlResult(
+        success=pal_result.success,
+        action=DesktopControlAction.OPEN_APP,
+        command=pal_result.command,
+        message=pal_result.message,
+        dry_run=pal_result.dry_run,
+        executed=not pal_result.dry_run and pal_result.success,
+    )
+    print(render_desktop_control_result(result))
+    return 0
+
+
+def _cmd_list_windows(args: argparse.Namespace) -> int:
+    wm = PlatformFactory.get_window_manager()
+    try:
+        windows = wm.list_windows()
         result = DesktopControlResult(
-            success=pal_result.success,
-            action=DesktopControlAction.OPEN_APP,
-            command=pal_result.command,
-            message=pal_result.message,
-            dry_run=pal_result.dry_run,
-            executed=not pal_result.dry_run and pal_result.success,
+            success=True,
+            action=DesktopControlAction.LIST_WINDOWS,
+            command=(),
+            message=str(windows),
+            dry_run=False,
+            executed=True,
         )
-        print(render_desktop_control_result(result))
-        return 0
+    except Exception as e:  # noqa: BLE001
+        result = DesktopControlResult(
+            success=False,
+            action=DesktopControlAction.LIST_WINDOWS,
+            command=(),
+            message=f"List windows failed: {e}",
+            dry_run=False,
+            executed=False,
+        )
+    print(render_desktop_control_result(result))
+    return 0
 
-    if args.command == "list-windows":
-        wm = PlatformFactory.get_window_manager()
-        try:
-            windows = wm.list_windows()
-            result = DesktopControlResult(
-                success=True,
-                action=DesktopControlAction.LIST_WINDOWS,
-                command=(),
-                message=str(windows),
-                dry_run=False,
-                executed=True,
-            )
-        except Exception as e:  # noqa: BLE001
-            result = DesktopControlResult(
-                success=False,
-                action=DesktopControlAction.LIST_WINDOWS,
-                command=(),
-                message=f"List windows failed: {e}",
-                dry_run=False,
-                executed=False,
-            )
-        print(render_desktop_control_result(result))
-        return 0
 
-    if args.command == "screenshot":
-        capture = PlatformFactory.get_screen_capture()
-        output_path = args.output
-        try:
-            if args.select_region:
-                pal_result = capture.capture_selected_region(
-                    output_path=output_path,
-                    dry_run=not args.execute,
-                )
-            else:
-                pal_result = capture.capture(
-                    output_path=output_path,
-                    geometry=args.geometry,
-                    dry_run=not args.execute,
-                )
-            success = getattr(pal_result, "success", True)
-            cmd = getattr(pal_result, "command", ())
-            msg = getattr(pal_result, "message", "Screenshot captured.")
-            dr = getattr(pal_result, "dry_run", not args.execute)
-            exec_ok = getattr(pal_result, "executed", args.execute and success)
-            out_p = getattr(pal_result, "output_path", Path(output_path) if output_path else None)
-
-            result = DesktopControlResult(
-                success=success,
-                action=DesktopControlAction.SCREENSHOT,
-                command=cmd,
-                message=msg,
-                dry_run=dr,
-                executed=exec_ok,
-                output_path=out_p,
-            )
-        except Exception as e:  # noqa: BLE001
-            result = DesktopControlResult(
-                success=False,
-                action=DesktopControlAction.SCREENSHOT,
-                command=(),
-                message=f"Screenshot failed: {e}",
-                dry_run=not args.execute,
-                executed=False,
-            )
-        print(render_desktop_control_result(result))
-        return 0 if result.success else 1
-
-    if args.command == "type-text":
-        syn = PlatformFactory.get_input_synthesizer()
-        try:
-            pal_result = syn.type_text(
-                args.text,
-                confirmed=args.confirmed,
+def _cmd_screenshot(args: argparse.Namespace) -> int:
+    capture = PlatformFactory.get_screen_capture()
+    output_path = args.output
+    try:
+        if args.select_region:
+            pal_result = capture.capture_selected_region(
+                output_path=output_path,
                 dry_run=not args.execute,
             )
-            success = getattr(pal_result, "success", True)
-            cmd = getattr(pal_result, "command", ())
-            msg = getattr(pal_result, "message", "Text typed successfully.")
-            dr = getattr(pal_result, "dry_run", not args.execute)
-            exec_ok = getattr(pal_result, "executed", args.execute and success)
-
-            result = DesktopControlResult(
-                success=success,
-                action=DesktopControlAction.TYPE_TEXT,
-                command=cmd,
-                message=msg,
-                dry_run=dr,
-                executed=exec_ok,
-            )
-        except Exception as e:  # noqa: BLE001
-            result = DesktopControlResult(
-                success=False,
-                action=DesktopControlAction.TYPE_TEXT,
-                command=(),
-                message=f"Type text failed: {e}",
+        else:
+            pal_result = capture.capture(
+                output_path=output_path,
+                geometry=args.geometry,
                 dry_run=not args.execute,
-                executed=False,
             )
-        print(render_desktop_control_result(result))
-        return 0 if result.success else 1
+        success = getattr(pal_result, "success", True)
+        cmd = getattr(pal_result, "command", ())
+        msg = getattr(pal_result, "message", "Screenshot captured.")
+        dr = getattr(pal_result, "dry_run", not args.execute)
+        exec_ok = getattr(pal_result, "executed", args.execute and success)
+        out_p = getattr(pal_result, "output_path", Path(output_path) if output_path else None)
 
-    if args.command == "notifications-ingest":
-        store = _notification_store(args)
-        event = create_notification_event(
-            app_name=args.app,
-            desktop_entry=args.desktop_entry,
-            summary=args.summary,
-            body=args.body,
-            source_window=args.source_window,
-            urgency=NotificationUrgency(args.urgency),
+        result = DesktopControlResult(
+            success=success,
+            action=DesktopControlAction.SCREENSHOT,
+            command=cmd,
+            message=msg,
+            dry_run=dr,
+            executed=exec_ok,
+            output_path=out_p,
         )
-        result = NotificationCenter(store=store).ingest(
-            event,
-            speak=args.speak,
-            persist=not args.dry_run,
-        )
-        print(render_notification_processing_result(result))
-        return 0
-
-    if args.command == "notifications-mode":
-        store = _notification_store(args)
-        state = store.set_focus_mode(
-            NotificationFocusMode(args.mode),
-            expires_at=expires_after_minutes(args.minutes),
-        )
-        expires = state.mode_expires_at.isoformat() if state.mode_expires_at else "manual"
-        print(f"Notification mode set to {state.mode.value}; expires: {expires}")
-        return 0
-
-    if args.command == "notifications-mute":
-        store = _notification_store(args)
-        expires_at = expires_after_minutes(args.minutes)
-        rules = tuple(
-            store.save_rule(
-                NotificationRule(
-                    app_pattern=app,
-                    action=NotificationAction(args.action),
-                    mode=args.mode,
-                    expires_at=expires_at,
-                )
-            )
-            for app in args.app
-        )
-        for rule in rules:
-            expires = rule.expires_at.isoformat() if rule.expires_at else "manual"
-            print(
-                f"Rule #{rule.id}: {rule.app_pattern} -> {rule.action.value} "
-                f"in {rule.mode} mode; expires: {expires}"
-            )
-        return 0
-
-    if args.command == "notifications-summary":
-        store = _notification_store(args)
-        pending = store.list_pending(limit=args.limit)
-        print(build_notification_digest(pending).render())
-        if args.mark_announced:
-            count = store.mark_events(
-                (event.id for event in pending),
-                NotificationStatus.ANNOUNCED,
-            )
-            print(f"Marked {count} notification(s) as announced.")
-        return 0
-
-    if args.command == "notifications-list":
-        store = _notification_store(args)
-        print(
-            render_notification_events(
-                store.list_events(
-                    statuses=_notification_status_filter(args.status),
-                    limit=args.limit,
-                )
-            )
-        )
-        return 0
-
-    if args.command == "notifications-clear":
-        if not args.confirmed:
-            print("Blocked: deleting notification memory requires --confirmed.")
-            return 1
-        store = _notification_store(args)
-        deleted = store.delete_events(statuses=_notification_status_filter(args.status))
-        print(f"Deleted {deleted} notification event(s).")
-        return 0
-
-    if args.command == "notifications-mark":
-        new_status = NotificationStatus(args.status)
-        if new_status in {NotificationStatus.REPLIED, NotificationStatus.DISMISSED}:
-            if not args.confirmed:
-                print(f"Blocked: marking as {new_status.value} requires --confirmed.")
-                return 1
-        store = _notification_store(args)
-        event = store.update_event_status(args.event_id, new_status)
-        if event is None:
-            print(f"Notification not found: {args.event_id}")
-            return 1
-        print(f"Marked {event.id} as {event.status.value}.")
-        return 0
-
-    if args.command == "notifications-listen":
-        store = _notification_store(args)
-        daemon = PlatformFactory.get_notification_daemon()
-        if hasattr(daemon, "center"):
-            daemon.center = NotificationCenter(store=store)
-        result = daemon.run(
-            seconds=args.seconds,
-            speak=args.speak,
+    except Exception as e:  # noqa: BLE001
+        result = DesktopControlResult(
+            success=False,
+            action=DesktopControlAction.SCREENSHOT,
+            command=(),
+            message=f"Screenshot failed: {e}",
             dry_run=not args.execute,
+            executed=False,
         )
-        status = "executed" if result.executed else "prepared"
-        if not result.success:
-            status = "failed"
-        lines = [f"Windows notifications [{status}]: {result.message}"]
-        for item in getattr(result, "results", ()):
-            lines.append(
-                f"- {item.stored_event.id if item.stored_event else item.event.id}: "
-                f"{item.action.value} {item.event.display_source}"
-            )
-        print("\n".join(lines))
-        return 0 if result.success else 1
+    print(render_desktop_control_result(result))
+    return 0 if result.success else 1
 
-    if args.command == "notifications-intent":
-        store = _notification_store(args)
-        intent = parse_notification_voice_intent(args.text)
-        result = execute_notification_voice_intent(
-            intent,
-            store=store,
-            mark_announced=args.mark_announced,
-        )
-        print(render_notification_voice_intent_result(result))
-        return 0 if result.success else 1
 
-    if args.command == "notifications-reply-draft":
-        store = _notification_store(args)
-        text_result = resolve_reply_text(
-            message=args.message,
-            audio_path=args.audio_path,
-            record_seconds=args.record_seconds,
-            record_audio_path=args.record_audio_path,
-            transcriber=LocalWhisperSTT(model_name=args.model, language=args.language),
-            listener=ListenOnce(
-                stt=LocalWhisperSTT(model_name=args.model, language=args.language),
-            ),
-        )
-        if not text_result.success:
-            print(f"Notification reply draft [blocked]: {text_result.message}")
-            return 1
-        result = NotificationReplyWorkflow(store=store).prepare_reply_draft(
-            event_id=args.event_id,
-            reply_text=text_result.text,
-            selector=args.selector,
-            snapshot_output=_read_optional_text_file(args.snapshot_json),
-            auto_select=args.auto_select,
+def _cmd_type_text(args: argparse.Namespace) -> int:
+    syn = PlatformFactory.get_input_synthesizer()
+    try:
+        pal_result = syn.type_text(
+            args.text,
             confirmed=args.confirmed,
             dry_run=not args.execute,
         )
-        print(render_notification_reply_draft_result(result))
-        return 0 if result.success else 1
+        success = getattr(pal_result, "success", True)
+        cmd = getattr(pal_result, "command", ())
+        msg = getattr(pal_result, "message", "Text typed successfully.")
+        dr = getattr(pal_result, "dry_run", not args.execute)
+        exec_ok = getattr(pal_result, "executed", args.execute and success)
 
-    if args.command == "plan":
-        router = ToolRouter.from_config_file(args.mcp_config)
-        print(
-            create_action_plan(
-                args.instruction,
-                llm_config=_planner_config(args),
-                available_tools=router.planner_tools(),
-                telemetry_store=_telemetry_store(args),
-                smart_layer_enabled=not args.disable_smart_layer,
-            ).render()
+        result = DesktopControlResult(
+            success=success,
+            action=DesktopControlAction.TYPE_TEXT,
+            command=cmd,
+            message=msg,
+            dry_run=dr,
+            executed=exec_ok,
         )
-        return 0
+    except Exception as e:  # noqa: BLE001
+        result = DesktopControlResult(
+            success=False,
+            action=DesktopControlAction.TYPE_TEXT,
+            command=(),
+            message=f"Type text failed: {e}",
+            dry_run=not args.execute,
+            executed=False,
+        )
+    print(render_desktop_control_result(result))
+    return 0 if result.success else 1
 
-    if args.command == "route-plan":
-        router = ToolRouter.from_config_file(args.mcp_config)
-        plan = create_action_plan(
+
+def _cmd_notifications_ingest(args: argparse.Namespace) -> int:
+    store = _notification_store(args)
+    event = create_notification_event(
+        app_name=args.app,
+        desktop_entry=args.desktop_entry,
+        summary=args.summary,
+        body=args.body,
+        source_window=args.source_window,
+        urgency=NotificationUrgency(args.urgency),
+    )
+    result = NotificationCenter(store=store).ingest(
+        event,
+        speak=args.speak,
+        persist=not args.dry_run,
+    )
+    print(render_notification_processing_result(result))
+    return 0
+
+
+def _cmd_notifications_mode(args: argparse.Namespace) -> int:
+    store = _notification_store(args)
+    state = store.set_focus_mode(
+        NotificationFocusMode(args.mode),
+        expires_at=expires_after_minutes(args.minutes),
+    )
+    expires = state.mode_expires_at.isoformat() if state.mode_expires_at else "manual"
+    print(f"Notification mode set to {state.mode.value}; expires: {expires}")
+    return 0
+
+
+def _cmd_notifications_mute(args: argparse.Namespace) -> int:
+    store = _notification_store(args)
+    expires_at = expires_after_minutes(args.minutes)
+    rules = tuple(
+        store.save_rule(
+            NotificationRule(
+                app_pattern=app,
+                action=NotificationAction(args.action),
+                mode=args.mode,
+                expires_at=expires_at,
+            )
+        )
+        for app in args.app
+    )
+    for rule in rules:
+        expires = rule.expires_at.isoformat() if rule.expires_at else "manual"
+        print(
+            f"Rule #{rule.id}: {rule.app_pattern} -> {rule.action.value} "
+            f"in {rule.mode} mode; expires: {expires}"
+        )
+    return 0
+
+
+def _cmd_notifications_summary(args: argparse.Namespace) -> int:
+    store = _notification_store(args)
+    pending = store.list_pending(limit=args.limit)
+    print(build_notification_digest(pending).render())
+    if args.mark_announced:
+        count = store.mark_events(
+            (event.id for event in pending),
+            NotificationStatus.ANNOUNCED,
+        )
+        print(f"Marked {count} notification(s) as announced.")
+    return 0
+
+
+def _cmd_notifications_list(args: argparse.Namespace) -> int:
+    store = _notification_store(args)
+    print(
+        render_notification_events(
+            store.list_events(
+                statuses=_notification_status_filter(args.status),
+                limit=args.limit,
+            )
+        )
+    )
+    return 0
+
+
+def _cmd_notifications_clear(args: argparse.Namespace) -> int:
+    if not args.confirmed:
+        print("Blocked: deleting notification memory requires --confirmed.")
+        return 1
+    store = _notification_store(args)
+    deleted = store.delete_events(statuses=_notification_status_filter(args.status))
+    print(f"Deleted {deleted} notification event(s).")
+    return 0
+
+
+def _cmd_notifications_mark(args: argparse.Namespace) -> int:
+    new_status = NotificationStatus(args.status)
+    if new_status in {NotificationStatus.REPLIED, NotificationStatus.DISMISSED}:
+        if not args.confirmed:
+            print(f"Blocked: marking as {new_status.value} requires --confirmed.")
+            return 1
+    store = _notification_store(args)
+    event = store.update_event_status(args.event_id, new_status)
+    if event is None:
+        print(f"Notification not found: {args.event_id}")
+        return 1
+    print(f"Marked {event.id} as {event.status.value}.")
+    return 0
+
+
+def _cmd_notifications_listen(args: argparse.Namespace) -> int:
+    store = _notification_store(args)
+    daemon = PlatformFactory.get_notification_daemon()
+    if hasattr(daemon, "center"):
+        daemon.center = NotificationCenter(store=store)
+    result = daemon.run(
+        seconds=args.seconds,
+        speak=args.speak,
+        dry_run=not args.execute,
+    )
+    status = "executed" if result.executed else "prepared"
+    if not result.success:
+        status = "failed"
+    lines = [f"Windows notifications [{status}]: {result.message}"]
+    for item in getattr(result, "results", ()):
+        lines.append(
+            f"- {item.stored_event.id if item.stored_event else item.event.id}: "
+            f"{item.action.value} {item.event.display_source}"
+        )
+    print("\n".join(lines))
+    return 0 if result.success else 1
+
+
+def _cmd_notifications_intent(args: argparse.Namespace) -> int:
+    store = _notification_store(args)
+    intent = parse_notification_voice_intent(args.text)
+    result = execute_notification_voice_intent(
+        intent,
+        store=store,
+        mark_announced=args.mark_announced,
+    )
+    print(render_notification_voice_intent_result(result))
+    return 0 if result.success else 1
+
+
+def _cmd_notifications_reply_draft(args: argparse.Namespace) -> int:
+    store = _notification_store(args)
+    text_result = resolve_reply_text(
+        message=args.message,
+        audio_path=args.audio_path,
+        record_seconds=args.record_seconds,
+        record_audio_path=args.record_audio_path,
+        transcriber=LocalWhisperSTT(model_name=args.model, language=args.language),
+        listener=ListenOnce(
+            stt=LocalWhisperSTT(model_name=args.model, language=args.language),
+        ),
+    )
+    if not text_result.success:
+        print(f"Notification reply draft [blocked]: {text_result.message}")
+        return 1
+    result = NotificationReplyWorkflow(store=store).prepare_reply_draft(
+        event_id=args.event_id,
+        reply_text=text_result.text,
+        selector=args.selector,
+        snapshot_output=_read_optional_text_file(args.snapshot_json),
+        auto_select=args.auto_select,
+        confirmed=args.confirmed,
+        dry_run=not args.execute,
+    )
+    print(render_notification_reply_draft_result(result))
+    return 0 if result.success else 1
+
+
+def _cmd_plan(args: argparse.Namespace) -> int:
+    router = ToolRouter.from_config_file(args.mcp_config)
+    print(
+        create_action_plan(
             args.instruction,
             llm_config=_planner_config(args),
             available_tools=router.planner_tools(),
             telemetry_store=_telemetry_store(args),
             smart_layer_enabled=not args.disable_smart_layer,
-        )
-        context = ToolExecutionContext(
-            dry_run=not args.execute,
-            confirmed=args.confirmed,
-        )
-        print(render_tool_results(router.route_plan(plan, context)))
-        return 0
-
-    if args.command == "telemetry-report":
-        print(render_telemetry_summary(_telemetry_store(args).summarize(days=args.days)))
-        return 0
-
-    if args.command == "browser-snapshot":
-        interaction_plan = BrowserInteractionLoop().open_and_snapshot(
-            args.url,
-            dry_run=not args.execute,
-        )
-        print(render_browser_interaction_plan(interaction_plan))
-        return _browser_plan_exit_code(interaction_plan.status)
-
-    if args.command == "browser-action":
-        interaction_plan = BrowserInteractionLoop().confirmed_ref_action(
-            kind=BrowserCommandKind(args.kind),
-            selector=args.selector,
-            text=args.text,
-            key=args.key,
-            confirmed=args.confirmed,
-            dry_run=not args.execute,
-        )
-        print(render_browser_interaction_plan(interaction_plan))
-        return _browser_plan_exit_code(interaction_plan.status)
-
-    if args.command == "coding-prompt":
-        agent = get_coding_agent(args.agent)
-        print(
-            build_coding_agent_prompt(
-                agent=agent,
-                project_path=args.project,
-                idea=args.idea,
-                user_constraints=tuple(args.constraint),
-            )
-        )
-        return 0
-
-    _print_status(config)
+        ).render()
+    )
     return 0
+
+
+def _cmd_route_plan(args: argparse.Namespace) -> int:
+    router = ToolRouter.from_config_file(args.mcp_config)
+    plan = create_action_plan(
+        args.instruction,
+        llm_config=_planner_config(args),
+        available_tools=router.planner_tools(),
+        telemetry_store=_telemetry_store(args),
+        smart_layer_enabled=not args.disable_smart_layer,
+    )
+    context = ToolExecutionContext(
+        dry_run=not args.execute,
+        confirmed=args.confirmed,
+    )
+    print(render_tool_results(router.route_plan(plan, context)))
+    return 0
+
+
+def _cmd_telemetry_report(args: argparse.Namespace) -> int:
+    print(render_telemetry_summary(_telemetry_store(args).summarize(days=args.days)))
+    return 0
+
+
+def _cmd_browser_snapshot(args: argparse.Namespace) -> int:
+    interaction_plan = BrowserInteractionLoop().open_and_snapshot(
+        args.url,
+        dry_run=not args.execute,
+    )
+    print(render_browser_interaction_plan(interaction_plan))
+    return _browser_plan_exit_code(interaction_plan.status)
+
+
+def _cmd_browser_action(args: argparse.Namespace) -> int:
+    interaction_plan = BrowserInteractionLoop().confirmed_ref_action(
+        kind=BrowserCommandKind(args.kind),
+        selector=args.selector,
+        text=args.text,
+        key=args.key,
+        confirmed=args.confirmed,
+        dry_run=not args.execute,
+    )
+    print(render_browser_interaction_plan(interaction_plan))
+    return _browser_plan_exit_code(interaction_plan.status)
+
+
+def _cmd_coding_prompt(args: argparse.Namespace) -> int:
+    agent = get_coding_agent(args.agent)
+    print(
+        build_coding_agent_prompt(
+            agent=agent,
+            project_path=args.project,
+            idea=args.idea,
+            user_constraints=tuple(args.constraint),
+        )
+    )
+    return 0
+
+
+_COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
+    "resource-plan": _cmd_resource_plan,
+    "diagnostics": _cmd_diagnostics,
+    "smoke-plan": _cmd_smoke_plan,
+    "smoke-simulate": _cmd_smoke_simulate,
+    "say": _cmd_say,
+    "listen-status": _cmd_listen_status,
+    "listen": _cmd_listen,
+    "transcribe-file": _cmd_transcribe_file,
+    "wake-command": _cmd_wake_command,
+    "wake-loop": _cmd_wake_loop,
+    "wake-efficient": _cmd_wake_efficient,
+    "open-app": _cmd_open_app,
+    "list-windows": _cmd_list_windows,
+    "screenshot": _cmd_screenshot,
+    "type-text": _cmd_type_text,
+    "notifications-ingest": _cmd_notifications_ingest,
+    "notifications-mode": _cmd_notifications_mode,
+    "notifications-mute": _cmd_notifications_mute,
+    "notifications-summary": _cmd_notifications_summary,
+    "notifications-list": _cmd_notifications_list,
+    "notifications-clear": _cmd_notifications_clear,
+    "notifications-mark": _cmd_notifications_mark,
+    "notifications-listen": _cmd_notifications_listen,
+    "notifications-intent": _cmd_notifications_intent,
+    "notifications-reply-draft": _cmd_notifications_reply_draft,
+    "plan": _cmd_plan,
+    "route-plan": _cmd_route_plan,
+    "telemetry-report": _cmd_telemetry_report,
+    "browser-snapshot": _cmd_browser_snapshot,
+    "browser-action": _cmd_browser_action,
+    "coding-prompt": _cmd_coding_prompt,
+}
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    handler = _COMMAND_HANDLERS.get(args.command)
+    if handler is None:
+        _print_status(_build_config(args))
+        return 0
+    return handler(args)
 
 
 def _browser_plan_exit_code(status: BrowserActionStatus) -> int:
