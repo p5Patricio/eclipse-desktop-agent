@@ -1,8 +1,13 @@
-# ADR 0001 — Eclipse como asistente desktop propio con OpenClaw opcional
+# ADR 0001 — Eclipse como asistente desktop propio
 
 ## Estado
 
-Aceptado — 2026-05-27
+Aceptado — 2026-05-27, refinado tras la migración a Windows-only.
+
+La decisión central (Eclipse como runtime propio, safety-first, modo borrador por defecto)
+sigue vigente. Refinamientos posteriores: el alcance se acotó a **Windows**, los proveedores
+de modelos se hicieron **intercambiables** (ollama/deepseek/openai), y OpenClaw quedó como
+referencia no integrada (ver [`../OPENCLAW_STRATEGY.md`](../OPENCLAW_STRATEGY.md)).
 
 ## Contexto
 

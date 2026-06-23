@@ -38,16 +38,6 @@ Mitigaciones:
 - Requerir confirmación en acciones sensibles aunque el modelo esté seguro.
 - Registrar por qué se usó cada herramienta.
 
-## OpenClaw
-
-OpenClaw solo se evaluará:
-
-- En VM, contenedor o usuario separado.
-- Con credenciales de prueba.
-- Sin exponerlo a internet durante la fase inicial.
-- Con logs activados.
-- Con revisión de plugins/tools antes de habilitarlos.
-
 ## Política de privacidad inicial
 
 Por defecto:

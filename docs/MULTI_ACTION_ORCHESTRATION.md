@@ -60,11 +60,13 @@ Natural-language instruction
 
 ## Segundo work unit implementado
 
-- `src/eclipse_agent/tool_router.py` rutea acciones a tools locales con safety gates.
-- `src/eclipse_agent/desktop_apps.py` descubre y prepara comandos para apps `.desktop`.
+- `src/eclipse_agent/tool_router.py` rutea acciones a tools locales con safety gates e
+  incluye `NativeMCPClient` (open_url, google_search, open_desktop_app, capture_screenshot).
+- `src/eclipse_agent/pal/windows/launcher.py` descubre apps del Menú Inicio (`.lnk`) y las
+  abre con `os.startfile`.
 - `src/eclipse_agent/browser_automation.py` prepara comandos `agent-browser` para navegador.
 - CLI `route-plan` muestra qué tools se usarían y corre en dry-run por defecto.
-- Tests cubren launcher de YouTube Music, browser URLs, búsqueda confirmada y bloqueo de alto riesgo.
+- Tests cubren launcher de apps, browser URLs, búsqueda confirmada y bloqueo de alto riesgo.
 
 ## Lo que sigue
 

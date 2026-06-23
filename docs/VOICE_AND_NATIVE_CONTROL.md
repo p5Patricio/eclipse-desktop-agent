@@ -1,110 +1,65 @@
-# Voz y control nativo Fedora/KDE
+# Voz y control nativo (Windows)
 
 ## Objetivo
 
-Este bloque acerca a Eclipse a una prueba real de asistente: hablar por TTS local, reportar si puede escuchar/transcribir, y preparar control nativo de apps Fedora/KDE.
+Que Eclipse hable por TTS local, reporte si puede escuchar/transcribir, y prepare/ejecute
+control nativo de Windows (apps, ventanas, capturas, tipeo) con confirmación.
 
 ## Estado implementado
 
 | Componente | Archivo | Estado |
 |---|---|---|
-| SystemTTS | `src/eclipse_agent/voice.py` | Prepara/ejecuta `spd-say` o `espeak-ng` |
-| LocalWhisperSTT | `src/eclipse_agent/voice.py` | Transcribe archivos con `faster-whisper` cuando se ejecuta desde `venv` |
-| Runtime diagnostics | `src/eclipse_agent/runtime_diagnostics.py` | Reporta binarios/módulos listos o faltantes |
-| MicrophoneRecorder | `src/eclipse_agent/voice.py` | Graba WAV corto con `arecord`/`pw-record` |
-| ListenOnce | `src/eclipse_agent/voice.py` | Graba una vez y transcribe una vez |
-| FedoraNativeController | `src/eclipse_agent/fedora_control.py` | Abre apps `.desktop`; window focus pendiente |
+| `SystemTTS` | `src/eclipse_agent/voice.py` | Sintetiza voz con SAPI de Windows (`pal/windows/voice.py`) |
+| `LocalWhisperSTT` | `src/eclipse_agent/voice.py` | Transcribe con `faster-whisper` |
+| `MicrophoneRecorder` | `src/eclipse_agent/voice.py` | Graba WAV corto con `sounddevice` + VAD (corte por silencio) |
+| `ListenOnce` | `src/eclipse_agent/voice.py` | Graba una vez y transcribe una vez |
+| `OpenWakeWordTrigger` | `src/eclipse_agent/voice.py` | Detección de wake word con openwakeword |
+| `WakeRuntime` | `src/eclipse_agent/wake_runtime.py` | Loop wake → escuchar → razonar → responder |
+| `runtime_diagnostics` | `src/eclipse_agent/runtime_diagnostics.py` | Reporta módulos/binarios listos o faltantes |
+
+El control nativo de Windows vive en la **Platform Abstraction Layer** (`pal/windows/`):
+
+| Capacidad | Implementación |
+|---|---|
+| Lanzar apps | `WindowsAppLauncher` busca accesos directos `.lnk` del Menú Inicio y abre con `os.startfile` |
+| Listar/enfocar ventanas | `WindowsWindowManager` vía `win32gui` |
+| Captura de pantalla | `WindowsScreenCapture` vía `PIL.ImageGrab` |
+| Tipeo nativo | `WindowsInputSynthesizer` (requiere `--confirmed`) |
 
 ## Comandos
 
-Diagnóstico:
+```bat
+:: Diagnóstico de capacidades
+eclipse-agent diagnostics
 
-```bash
-PYTHONPATH=src python -m eclipse_agent diagnostics
+:: Hablar (dry-run, luego real)
+eclipse-agent say --text "Hola, soy Eclipse."
+eclipse-agent say --text "Hola, soy Eclipse." --execute
+
+:: Estado de STT y escucha real
+eclipse-agent listen-status
+eclipse-agent listen --seconds 3 --execute
+eclipse-agent transcribe-file --audio-path C:\ruta\audio.wav
+
+:: Control de escritorio
+eclipse-agent open-app --app "Notepad" --execute
+eclipse-agent list-windows
+eclipse-agent screenshot --output captura.png --execute
+eclipse-agent type-text --text "hola" --confirmed --execute
 ```
-
-Hablar en dry-run:
-
-```bash
-PYTHONPATH=src python -m eclipse_agent say --text "Hola, soy Eclipse."
-```
-
-Hablar realmente:
-
-```bash
-PYTHONPATH=src python -m eclipse_agent say --text "Hola, soy Eclipse." --execute
-```
-
-Estado de escucha/STT:
-
-```bash
-PYTHONPATH=src venv/bin/python -m eclipse_agent listen-status
-```
-
-Escuchar una vez en dry-run:
-
-```bash
-PYTHONPATH=src venv/bin/python -m eclipse_agent listen --seconds 3
-```
-
-Escuchar realmente y transcribir:
-
-```bash
-PYTHONPATH=src venv/bin/python -m eclipse_agent listen --seconds 3 --execute
-```
-
-Transcribir archivo:
-
-```bash
-PYTHONPATH=src venv/bin/python -m eclipse_agent transcribe-file --audio-path /tmp/audio.wav
-```
-
-Abrir app nativa en dry-run:
-
-```bash
-PYTHONPATH=src python -m eclipse_agent fedora-open --app "YouTube Music"
-```
-
-Abrir app realmente:
-
-```bash
-PYTHONPATH=src python -m eclipse_agent fedora-open --app "YouTube Music" --execute
-```
-
-## Diagnóstico actual de la máquina
-
-Listo:
-
-- `spd-say`
-- `espeak-ng`
-- `arecord`
-- `pw-record`
-- `faster-whisper` en `venv`
-- `dbus-monitor`
-- `gdbus`
-- `ydotool`
-
-Falta:
-
-- `pyaudio` dentro de `venv` es opcional; falló porque falta `portaudio.h`, pero no bloquea porque usamos `arecord`.
-- `kdotool` opcional; no es bloqueante si usamos KWin/D-Bus/AT-SPI.
 
 ## Límites actuales
 
-Eclipse ya puede hablar si ejecutamos `say --execute`, y puede grabar/transcribir clips con `listen --execute` usando `venv`. Todavía no tiene un loop de conversación continuo ni wake-word real.
+Eclipse ya habla (SAPI), graba y transcribe (faster-whisper), detecta wake word
+(openwakeword), abre apps, lista ventanas, captura pantalla y tipea texto. Lo que falta
+para control profundo de UI:
 
-Eclipse puede abrir apps nativas, pero todavía no puede controlar profundamente ventanas o widgets nativos. Para eso faltan:
-
-1. Validar estrategia KWin/D-Bus para listar/enfocar ventanas.
-2. Evaluar AT-SPI para elementos accesibles.
-3. Usar `ydotool` solo como último recurso con permisos explícitos.
-4. Agregar verificación de resultado.
+1. Enfoque/manipulación fina de ventanas y widgets (UI Automation de Windows).
+2. Verificación de resultado tras cada acción.
+3. Un modelo de wake word `Eclipse` propio que pase evaluación (hoy usa `hey_jarvis`).
 
 ## Próximos bloques
 
-1. Implementar push-to-talk con tecla/atajo global.
-2. Implementar wake-word local.
-3. Conectar el texto transcrito al planner/ToolRouter.
-4. Implementar daemon/wake-word.
-5. Implementar D-Bus NotificationListener + SQLite store.
-6. Implementar KWin/AT-SPI window focus verification.
+1. Push-to-talk con atajo global.
+2. Integrar UI Automation (`uiautomation`) para leer/activar elementos accesibles.
+3. Verificación de resultado en acciones de control.

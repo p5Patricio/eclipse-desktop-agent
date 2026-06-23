@@ -68,24 +68,14 @@ Política base:
 
 ## Ejemplo desde ToolRouter
 
-```bash
-PYTHONPATH=src python -m eclipse_agent route-plan \
-  --instruction "Abre YouTube, Instagram y Messenger en el navegador."
-```
-
-Dry-run esperado:
-
-```txt
-Eclipse tool routing:
-- action-1 [prepared] browser_automation: Open web app in controlled browser session.
-  command: agent-browser --session eclipse-mvp --allowed-domains ... open https://www.youtube.com/
+```bat
+eclipse-agent route-plan --instruction "Abre YouTube, Instagram y Messenger en el navegador"
 ```
 
 ## Ejemplo de snapshot e interacción
 
-```bash
-PYTHONPATH=src python -m eclipse_agent browser-snapshot \
-  --url https://example.com
+```bat
+eclipse-agent browser-snapshot --url https://example.com
 ```
 
 Dry-run:
@@ -96,23 +86,16 @@ agent-browser ... batch --json --bail 'open https://example.com' 'snapshot -i'
 
 Después de obtener una ref del snapshot, por ejemplo `@e2`, una acción activa se prepara así:
 
-```bash
-PYTHONPATH=src python -m eclipse_agent browser-action \
-  --kind fill \
-  --selector @e2 \
-  --text "mensaje borrador" \
-  --confirmed
+```bat
+eclipse-agent browser-action --kind fill --selector @e2 --text "mensaje borrador" --confirmed
 ```
 
 Sin `--confirmed`, Eclipse bloquea la acción.
 
-Para ejecución real, `agent-browser` ya fue instalado globalmente y Chrome for Testing ya fue descargado:
-
-```bash
-PYTHONPATH=src python -m eclipse_agent route-plan \
-  --instruction "Abre Instagram en el navegador" \
-  --execute
-```
+La automatización web es **opcional**. Para ejecución real instalá `agent-browser`
+(`npm install -g agent-browser` y `agent-browser install` para descargar Chrome for
+Testing) y agregá `--execute`. Si el binario no está, Eclipse prepara el comando en dry-run
+sin fallar.
 
 ## Siguiente paso técnico
 

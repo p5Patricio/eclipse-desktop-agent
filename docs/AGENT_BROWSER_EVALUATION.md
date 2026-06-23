@@ -32,10 +32,11 @@
 
 ## Limitaciones
 
-- Solo controla navegador, no todo KDE/Linux.
+- Solo controla el navegador, no el resto del escritorio (eso lo cubre el PAL de Windows).
 - Sigue requiriendo seguridad: un LLM puede elegir la acción equivocada.
 - Algunas páginas complejas o anti-bot pueden fallar.
-- Para construir desde fuente pide Node 24+, pnpm 11+ y Rust. En nuestra máquina actual tenemos Node 22, así que conviene usar el binario publicado o actualizar Node si hace falta.
+- Para instalarlo se usa `npm install -g agent-browser` (requiere Node); para construir desde
+  fuente pide Node 24+, pnpm y Rust.
 - Manejar sesiones autenticadas implica riesgo: cookies/state files pueden contener tokens.
 
 ## Integración propuesta
@@ -97,6 +98,5 @@ Usar `agent-browser` como **candidato principal de automatización web para agen
 
 Mantener:
 
-- Playwright para scripts deterministas y fallback.
-- Herramientas desktop Linux para acciones fuera del navegador.
-- OpenClaw como complemento de canales/plugins, no como controlador web principal.
+- Playwright como fallback para scripts deterministas.
+- El PAL de Windows para acciones fuera del navegador.

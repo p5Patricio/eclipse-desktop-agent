@@ -1,175 +1,118 @@
-# Notificaciones y control desktop en Fedora/KDE
+# Notificaciones y control de escritorio (Windows)
 
-Eclipse debe funcionar como copiloto silencioso o hablador según el contexto. La meta es capturar notificaciones, decidir si interrumpir, guardar lo que llegó y permitir responder después con confirmación.
-
-Eclipse correrá como daemon local always-on. Ese daemon puede escuchar notificaciones y wake word, pero no debe hacer transcripción continua del micrófono por defecto.
+Eclipse funciona como copiloto silencioso o hablador según el contexto: captura
+notificaciones de Windows, decide si interrumpir según el modo, guarda lo que llegó y
+permite responder después con confirmación.
 
 ## Quick path
 
-1. Capturar notificaciones del bus de sesión D-Bus.
-2. Aplicar reglas de foco: hablar, silenciar, agrupar o ignorar.
+1. Capturar notificaciones del sistema con el listener de Windows (winrt).
+2. Aplicar reglas de foco: hablar, encolar, agrupar o ignorar.
 3. Guardar eventos permitidos en SQLite local.
-4. Responder desde navegador/apps con herramientas seguras y confirmación.
+4. Responder desde el navegador con herramientas seguras y confirmación.
 
 ## Estado actual
 
-Primer work unit implementado en `src/eclipse_agent/notifications.py`:
+Implementado en `src/eclipse_agent/notifications.py` (lógica neutral) y
+`src/eclipse_agent/pal/windows/notifications.py` (listener de Windows):
 
 | Bloque | Estado |
 |---|---|
-| 1. Modelo `NotificationEvent` | Hecho: evento normalizado con fuente web/nativa, urgencia, privacidad y estado. |
-| 2. Normalizador web/nativo | Hecho: Chrome/Firefox/etc. pueden mapearse a Instagram, Messenger, Gmail, YouTube, etc. |
-| 3. Reglas por app/fuente | Hecho: `NotificationRule` soporta `announce`, `queue`, `ignore` y `metadata_only`. |
-| 4. Modos normal/foco/juego/privado | Hecho: `game` y `focus` encolan; `private` guarda solo metadatos. |
-| 5. SQLite local | Hecho: eventos, reglas y modo actual se guardan localmente. |
-| 6. Anunciador TTS | Hecho: integra `SystemTTS`; la CLI prepara voz por defecto y habla con `--speak`. |
-| 7. Resumen de pendientes + D-Bus scaffold | Hecho: digest de cola, marcado como anunciado, parser de bloques `Notify` y comando inicial `dbus-monitor`. |
-| 8. Daemon D-Bus inicial | Hecho: `notifications-listen` conecta `dbus-monitor` con `NotificationCenter`. |
-| 9. Intents de voz | Hecho: parser determinístico para “modo juego”, “no me avises...” y “dime qué llegó”. |
-| 10. Memoria revisable/borrable | Hecho: `notifications-list` y `notifications-clear --confirmed`. |
-| 11. Respuesta en borrador | Hecho: `notifications-reply-draft` acepta `--message`, `--audio-path` o `--record-seconds`, abre/snapshotea web app, puede autoseleccionar un input desde snapshot JSON y rellena un ref confirmado sin enviar. |
-| 12. Servicio de usuario | Hecho: `notifications-service` renderiza/instala/activa un unit systemd user para el listener. |
-| 13. Estado post-respuesta | Hecho: `notifications-mark --status replied --confirmed`. |
-| 14. Smoke test | Hecho: `smoke-plan` y `smoke-simulate` para ensayo local/controlado. |
-| 15. Selector automático de refs | Hecho: `--snapshot-json --auto-select` elige inputs probables de mensaje. |
-| 16. Wake/listen/respond | Hecho: `wake-command` y `wake-loop` conectan voz, intents de notificación, planner, router y TTS. |
+| Modelo `NotificationEvent` | Hecho: evento normalizado con fuente web/nativa, urgencia, privacidad y estado. |
+| Normalizador web/nativo | Hecho: Chrome/Edge/etc. se mapean a Instagram, Messenger, Gmail, YouTube, etc. |
+| Reglas por app/fuente | Hecho: `NotificationRule` soporta `announce`, `queue`, `ignore` y `metadata_only`. |
+| Modos normal/foco/juego/privado | Hecho: `game` y `focus` encolan; `private` guarda solo metadatos. |
+| Store SQLite local | Hecho: eventos, reglas y modo actual bajo `%LOCALAPPDATA%\eclipse-agent\`. |
+| Anunciador TTS | Hecho: integra `SystemTTS` (SAPI); la CLI prepara voz por defecto y habla con `--speak`. |
+| Resumen de pendientes | Hecho: digest de cola y marcado como anunciado. |
+| Listener de Windows | Hecho: `notifications-listen` usa `UserNotificationListener` (extra `.[notifications]`). |
+| Intents de voz | Hecho: parser determinista para "modo juego", "no me avises..." y "dime qué llegó". |
+| Memoria revisable/borrable | Hecho: `notifications-list` y `notifications-clear --confirmed`. |
+| Respuesta en borrador | Hecho: `notifications-reply-draft` (texto/audio/grabación), abre/snapshotea la web app y rellena un ref confirmado **sin enviar**. |
+| Estado post-respuesta | Hecho: `notifications-mark --status replied --confirmed`. |
+| Wake/listen/respond | Hecho: `wake-command` y `wake-loop` conectan voz, intents, planner, router y TTS. |
+| Smoke test | Hecho: `smoke-plan` y `smoke-simulate`. |
 
-Falta completar adapters nativos app por app y reemplazar la detección inicial
-por un hotword engine dedicado si necesitamos menor consumo en reposo.
+## Captura de notificaciones en Windows
 
-## Decisión SQLite vs DuckDB
+El listener usa la API de Windows Runtime `Windows.UI.Notifications.Management`
+(`UserNotificationListener`) para leer las notificaciones del sistema. Requiere el extra
+opcional:
 
-Para el store operacional de notificaciones mantenemos **SQLite**.
+```bat
+.venv\Scripts\python -m pip install -e ".[notifications]"
+```
 
-DuckDB es una excelente opción Python para consultas analíticas/OLAP, pero el
-workload de Eclipse aquí es más transaccional: insertar notificaciones pequeñas,
-actualizar estados, leer una cola y borrar memoria local. SQLite viene con
-Python, no agrega dependencia y encaja mejor para esta ruta caliente del daemon.
+La primera vez Windows pide permiso de acceso a notificaciones; si se deniega, el listener
+reporta el bloqueo en lugar de fallar.
 
-DuckDB queda como opción complementaria futura para analytics/export de historial,
-por ejemplo resúmenes semanales o consultas sobre Parquet. La decisión está en
-[`docs/adr/0003-notification-storage-sqlite.md`](adr/0003-notification-storage-sqlite.md).
+### Límites reales
 
-## Flujo esperado: jugando Rocket League
+- Algunas apps ocultan contenido por configuración de privacidad.
+- Instagram/Messenger en navegador aparecen como notificación de Chrome/Edge, no como
+  "Instagram" puro; el normalizador intenta recuperar el origen real.
+- Capturar una notificación no implica poder responder por API: para responder se usa el
+  navegador con control seguro y confirmación.
+
+## Flujo esperado: jugando un rato
 
 ```txt
 1. Llega una notificación de Instagram.
 2. Eclipse la captura como evento local.
-3. Eclipse revisa modo actual:
+3. Eclipse revisa el modo actual:
    - normal: habla.
    - juego/enfoque: guarda sin interrumpir.
-   - privado: ignora o guarda solo metadatos.
-4. Si puede hablar:
-   Eclipse: "Tienes un mensaje de Instagram del grupo X: ... ¿quieres responder?"
-5. Usuario dicta respuesta.
-6. Eclipse activa STT solo después de wake word/push-to-talk y transcribe con Whisper local.
-7. Eclipse abre/prepara Instagram Web con agent-browser.
-8. Eclipse escribe borrador.
-9. Eclipse pregunta confirmación.
-10. Solo si el usuario confirma, envía.
+   - privado: guarda solo metadatos.
+4. Si puede hablar: "Tienes un mensaje de Instagram. ¿Querés responder?"
+5. El usuario dicta la respuesta (STT local tras wake word).
+6. Eclipse abre/prepara Instagram Web con agent-browser.
+7. Eclipse escribe un borrador y pide confirmación.
+8. Solo si el usuario confirma, envía.
 ```
 
 ## Comandos de usuario
 
-| Comando | Resultado |
+| Comando hablado | Resultado |
 |---|---|
-| “Eclipse, no me avises de Instagram ni Messenger” | Silencia esas apps y guarda eventos. |
-| “Eclipse, modo juego por una hora” | No habla notificaciones salvo urgentes/allowlist. |
-| “Eclipse, dime qué llegó” | Resume notificaciones pendientes. |
-| “Eclipse, responde al grupo de Instagram que ahorita entro” | Prepara borrador y pide confirmación. |
-| “Eclipse, vuelve a avisarme normal” | Desactiva modo foco/silencio. |
+| "Eclipse, no me avises de Instagram ni Messenger" | Silencia esas apps y guarda eventos. |
+| "Eclipse, modo juego por una hora" | No habla notificaciones salvo urgentes. |
+| "Eclipse, dime qué llegó" | Resume notificaciones pendientes. |
+| "Eclipse, responde al grupo que ahorita entro" | Prepara borrador y pide confirmación. |
+| "Eclipse, vuelve a avisarme normal" | Desactiva modo foco/silencio. |
 
 ## CLI de desarrollo
 
-```bash
-# No molestar mientras juego una hora.
-PYTHONPATH=src python -m eclipse_agent notifications-mode --mode game --minutes 60
+```bat
+:: No molestar mientras juego una hora
+eclipse-agent notifications-mode --mode game --minutes 60
 
-# Silenciar Instagram y Messenger: se guardan para resumen posterior.
-PYTHONPATH=src python -m eclipse_agent notifications-mute --app Instagram --app Messenger
+:: Silenciar apps (se guardan para resumen posterior)
+eclipse-agent notifications-mute --app Instagram --app Messenger
 
-# Simular una notificación web de Instagram emitida por Chrome.
-PYTHONPATH=src python -m eclipse_agent notifications-ingest \
-  --app "Google Chrome" \
-  --summary "Instagram" \
-  --body "Nuevo mensaje de Ana" \
-  --source-window "Instagram - Google Chrome"
+:: Simular una notificación web de Instagram emitida por Chrome
+eclipse-agent notifications-ingest --app "Google Chrome" --summary "Instagram" ^
+  --body "Nuevo mensaje de Ana" --source-window "Instagram - Google Chrome"
 
-# Al terminar: leer resumen de lo que llegó y marcarlo como anunciado.
-PYTHONPATH=src python -m eclipse_agent notifications-summary --mark-announced
+:: Leer resumen y marcarlo como anunciado
+eclipse-agent notifications-summary --mark-announced
 
-# Ver el comando base para capturar Notify en Fedora/KDE.
-PYTHONPATH=src python -m eclipse_agent notifications-dbus-command
+:: Listener real de notificaciones de Windows (requiere el extra .[notifications])
+eclipse-agent notifications-listen --seconds 30 --execute
 
-# Preparar o ejecutar el listener D-Bus real durante 30 segundos.
-PYTHONPATH=src python -m eclipse_agent notifications-listen --seconds 30
-PYTHONPATH=src python -m eclipse_agent notifications-listen --seconds 30 --execute
+:: Ejecutar comandos como si vinieran de voz
+eclipse-agent notifications-intent --text "Eclipse, modo juego por una hora"
 
-# Renderizar o instalar el servicio systemd de usuario.
-PYTHONPATH=src python -m eclipse_agent notifications-service --action render
-PYTHONPATH=src python -m eclipse_agent notifications-service --action install
-PYTHONPATH=src python -m eclipse_agent notifications-service --action install --execute
-PYTHONPATH=src python -m eclipse_agent notifications-service --action enable-now
-PYTHONPATH=src python -m eclipse_agent notifications-service --action enable-now --execute
+:: Revisar o borrar la memoria local
+eclipse-agent notifications-list --status queued
+eclipse-agent notifications-clear --status announced --confirmed
 
-# Ejecutar comandos como si vinieran de voz/STT.
-PYTHONPATH=src python -m eclipse_agent notifications-intent \
-  --text "Eclipse, modo juego por una hora"
-PYTHONPATH=src python -m eclipse_agent notifications-intent \
-  --text "No me avises de Instagram ni Messenger"
-PYTHONPATH=src python -m eclipse_agent notifications-intent \
-  --text "Dime qué llegó" \
-  --mark-announced
+:: Preparar una respuesta segura en el navegador (sin enviar)
+eclipse-agent notifications-reply-draft --event-id EVENT_ID --message "Ahorita entro"
+eclipse-agent notifications-mark --event-id EVENT_ID --status replied --confirmed
 
-# Ejecutar el pipeline de voz completo desde texto transcrito.
-PYTHONPATH=src venv/bin/python -m eclipse_agent wake-command \
-  --text "Eclipse, dime qué llegó" \
-  --mark-announced
-
-# Prueba real acotada con micrófono y STT local.
-PYTHONPATH=src venv/bin/python -m eclipse_agent wake-loop \
-  --iterations 1 \
-  --wake-seconds 4 \
-  --execute
-
-# Revisar o borrar memoria local de notificaciones.
-PYTHONPATH=src python -m eclipse_agent notifications-list --status queued
-PYTHONPATH=src python -m eclipse_agent notifications-clear \
-  --status announced \
-  --confirmed
-
-# Preparar una respuesta segura en navegador: primero snapshot, luego fill confirmado.
-PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
-  --event-id EVENT_ID \
-  --message "Ahorita entro"
-PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
-  --event-id EVENT_ID \
-  --audio-path /tmp/eclipse-reply.wav
-PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
-  --event-id EVENT_ID \
-  --record-seconds 4 \
-  --record-audio-path /tmp/eclipse-reply.wav
-PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
-  --event-id EVENT_ID \
-  --message "Ahorita entro" \
-  --selector @e7 \
-  --confirmed
-PYTHONPATH=src python -m eclipse_agent notifications-reply-draft \
-  --event-id EVENT_ID \
-  --message "Ahorita entro" \
-  --snapshot-json /tmp/instagram-snapshot.json \
-  --auto-select \
-  --confirmed
-
-# Marcar que la notificación ya fue respondida.
-PYTHONPATH=src python -m eclipse_agent notifications-mark \
-  --event-id EVENT_ID \
-  --status replied \
-  --confirmed
-
-# Checklist y simulación local antes de prueba real.
-PYTHONPATH=src python -m eclipse_agent smoke-plan
-PYTHONPATH=src python -m eclipse_agent smoke-simulate
+:: Checklist y simulación local
+eclipse-agent smoke-plan
+eclipse-agent smoke-simulate
 ```
 
 `notifications-ingest` guarda el evento localmente. Si la decisión es anunciar, prepara el
@@ -178,126 +121,32 @@ comando TTS en dry-run; para hablar de verdad se usa `--speak`.
 ## Arquitectura de notificaciones
 
 ```txt
-D-Bus Notification Listener
+Windows Notification Listener (winrt)
   -> Notification Normalizer
   -> Privacy Filter
   -> Notification Rules Engine
-  -> Local Notification Store
+  -> Local Notification Store (SQLite)
   -> Announcer / Queue
-  -> Optional Reply Workflow
+  -> Optional Reply Workflow (agent-browser + confirmación)
 ```
 
-## Captura en Linux/Fedora/KDE
+## Decisión de almacenamiento
 
-Fedora KDE usa notificaciones de escritorio mediante el estándar `org.freedesktop.Notifications` sobre D-Bus. Las aplicaciones envían llamadas `Notify` con campos como aplicación, resumen, cuerpo, icono, acciones, hints y expiración.
+El store operacional usa **SQLite**: el workload es transaccional (insertar notificaciones,
+actualizar estados, leer una cola, borrar memoria). Viene con Python y no agrega
+dependencias. La decisión está en
+[`adr/0003-notification-storage-sqlite.md`](adr/0003-notification-storage-sqlite.md).
 
-### Primera implementación
+## Núcleo determinista vs cerebro opcional
 
-Usar un listener de sesión para observar llamadas `Notify`:
-
-```bash
-dbus-monitor "interface='org.freedesktop.Notifications',member='Notify'"
-```
-
-Después migrar a una implementación Python con `dbus-next`, `pydbus` o `jeepney`.
-
-### Límites reales
-
-- Algunas apps ocultan contenido por configuración de privacidad.
-- Instagram/Messenger en navegador pueden aparecer como notificación de Chrome/Chromium, no como “Instagram” puro.
-- En modo “No molestar” de KDE, puede cambiar qué se muestra, pero Eclipse debe tener su propia cola interna.
-- Capturar notificaciones no implica poder responder por API; para responder usaremos navegador/control seguro.
-
-## Modelo de datos mínimo
-
-```python
-NotificationEvent(
-    id: str,
-    received_at: datetime,
-    app_name: str,
-    desktop_entry: str | None,
-    summary: str,
-    body: str,
-    urgency: str | None,
-    source_window: str | None,
-    status: "new" | "announced" | "queued" | "dismissed" | "replied",
-    privacy_level: "full" | "metadata_only" | "redacted",
-)
-```
-
-```python
-NotificationRule(
-    app_pattern: str,
-    action: "announce" | "queue" | "ignore" | "metadata_only",
-    mode: "normal" | "focus" | "game" | "private",
-    expires_at: datetime | None,
-)
-```
-
-## Control de apps nativas en Fedora/KDE Wayland
-
-Eclipse debe preferir herramientas semánticas sobre clicks ciegos.
-
-| Capa | Uso | Prioridad |
-|---|---|---|
-| APIs de la app / CLI | Telegram CLI, KDE tools, archivos, reproductores | Alta |
-| D-Bus | Notificaciones, apps KDE, portales, MPRIS/media | Alta |
-| agent-browser | Web apps como Instagram/Messenger/Gmail | Alta para web |
-| AT-SPI | Leer/activar elementos accesibles de apps nativas | Media/alta |
-| KWin scripting | Ventanas, foco, escritorios, estado fullscreen | Media |
-| ydotool | Teclas/mouse de último recurso en Wayland | Baja, con permisos explícitos |
-| OCR/screenshot | Cuando no hay accesibilidad/API | Baja, requiere privacidad |
-
-## Wayland: implicación importante
-
-Tu entorno actual es Fedora KDE en Wayland. Wayland es más seguro que X11 y restringe automatización global. Por eso Eclipse debe usar este orden:
-
-1. API/CLI/D-Bus si existe.
-2. Accesibilidad AT-SPI si la app la expone.
-3. KWin scripting para ventanas.
-4. ydotool solo como último recurso.
-5. Click visual solo si no hay otra opción y con confirmación.
-
-## ¿Necesitamos un LLM?
-
-No para todo.
-
-| Función | ¿Necesita LLM? | Puede ser gratis/local |
-|---|---:|---:|
-| Escuchar wake word local y luego Whisper | No | Sí |
-| Hablar con `spd-say`/`espeak-ng` | No | Sí |
-| Capturar notificaciones | No | Sí |
-| Silenciar Instagram/Messenger | No | Sí |
-| Leer cola de notificaciones | No | Sí |
-| Dictar respuesta exacta | No necesariamente | Sí |
-| Resumir muchas notificaciones | Sí o heurísticas simples | Sí, con modelo local |
-| “Responde de forma amable/profesional” | Sí recomendado | Sí, con modelo local o MiniMax |
-| Analizar pantalla compleja | Sí recomendado | Local multimodal futuro o cloud |
-| Planear acciones multi-paso | Sí recomendado | Local/MiniMax/premium |
-
-La arquitectura correcta es separar:
+La mayoría de las funciones de notificaciones **no** necesitan un LLM (capturar, silenciar,
+encolar, resumir con heurísticas). El LLM solo entra para resúmenes ricos, redacción de
+respuestas o razonamiento multi-paso:
 
 ```txt
-Eclipse Core determinístico
-  - audio local
-  - notificaciones
-  - reglas
-  - memoria
-  - permisos
-  - herramientas
-
-Eclipse Brain opcional
-  - LLM local o cloud
-  - resumen
-  - redacción
-  - razonamiento
-  - planificación
+Eclipse Core determinista          Eclipse Brain opcional (LLM)
+  - audio local                      - resumen rico
+  - notificaciones                   - redacción de respuestas
+  - reglas y memoria                 - razonamiento / planificación
+  - permisos y herramientas          (local Ollama o DeepSeek)
 ```
-
-## Siguiente implementación recomendada
-
-1. Probar selector automático con snapshots reales de Instagram/Messenger/Gmail
-   y ajustar heurísticas por sitio.
-2. Ejecutar `notifications-service --action install --execute` y
-   `enable-now --execute` en la sesión real del usuario.
-3. Control nativo con D-Bus/AT-SPI cuando una app no sea web.

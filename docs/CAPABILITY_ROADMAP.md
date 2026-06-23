@@ -1,103 +1,42 @@
-# Funciones pendientes de Eclipse
+# Funciones de Eclipse: estado y pendientes
 
-Este documento resume qué ya existe como scaffold y qué falta para que Eclipse se use como asistente diario.
+Resumen de qué ya funciona y qué falta para usar Eclipse como asistente diario en Windows.
 
-## Estado rápido
+## Estado
 
 | Área | Estado | Siguiente paso |
 |---|---|---|
-| Activación always-on | Scaffold | Daemon real + wake word local |
-| Voz STT/TTS | TTS + STT one-shot probado | Push-to-talk y wake-word |
-| Planner multi-acción | Scaffold probado | Planner con LLM/local heuristics para casos ambiguos |
-| ToolRouter | Scaffold probado | Scheduler con paralelismo, timeout y cancelación |
-| Desktop apps | Apertura scaffold probado | Enfocar ventanas KDE y verificar |
-| Browser automation | Navegador real probado | Selector automático de refs semánticas |
-| Browser interaction loop | Snapshot JSON parseado | Elegir refs semánticas automáticamente |
-| YouTube Music | Launcher detectado | Buscar canción y reproducir resultado correcto |
-| Instagram/Messenger | URLs preparadas | Preparar respuestas sin enviar, con confirmación |
-| Notificaciones | Core SQLite/reglas/daemon/intents/servicio/reply selector implementado | Pruebas reales con sitios autenticados |
-| Agentes de codificación | Prompt contract | Launcher de Claude/Gemini/Codex con confirmación |
-| Memoria local | Diseñada | SQLite para eventos, permisos y auditoría |
-| Seguridad | Primitivas | Permission store, audit log y kill switch |
-| Smoke test | Simulación local y checklist real | Prueba E2E con servicios reales |
+| Plataforma | Windows-only (PAL completo) | — |
+| Activación always-on | Wake word local implementado | Daemon de fondo + atajo push-to-talk |
+| Voz STT/TTS | faster-whisper + SAPI funcionando | Modelo de wake word `Eclipse` propio |
+| Planner multi-acción | Híbrido determinista + LLM | Mejores heurísticas para casos ambiguos |
+| Proveedores LLM | ollama / deepseek / openai configurables | Verificar round-trip real de DeepSeek |
+| ToolRouter | Tools nativas + MCP, con safety gates | Scheduler con paralelismo/timeout/cancelación |
+| Apps de escritorio | Launcher del Menú Inicio | Enfoque/control de ventanas (UI Automation) |
+| Browser automation | `agent-browser` (opcional) | Selección automática de refs semánticas |
+| Notificaciones | Core SQLite + listener winrt + intents + reply | Pruebas reales con sitios autenticados |
+| Visión de pantalla | Captura + análisis local + redacción | Mejorar detección de zonas sensibles |
+| Agentes de codificación | Prompt contract | Launcher con confirmación y kill switch |
+| Memoria local | SQLite (notificaciones, telemetría) | Permission store y audit log |
+| Seguridad | Draft-first + confirmaciones + redactor | Kill switch y panel de permisos |
+| Entorno | venv reproducible (`setup.bat`) | — |
 
 ## Bloques prioritarios
 
-### 1. Probar `agent-browser` real
+### Web adapters por sitio
+- Parsear snapshots de `agent-browser` en `BrowserElement` (hecho) y rankear elementos
+  interactivos (textbox/button/link).
+- YouTube Music: abrir, buscar, elegir resultado, reproducir, verificar.
+- Instagram/Messenger: abrir, preparar borrador, **no enviar** hasta confirmación.
 
-- Instalado `agent-browser` global.
-- Ejecutado `agent-browser install` y descargado Chrome for Testing.
-- Probado `example.com` con snapshot real.
-- Confirmado formato JSON de `batch --json`.
+### Control nativo
+- UI Automation de Windows para leer/activar elementos accesibles.
+- Verificación de resultado tras cada acción.
 
-### 2. Snapshot parser
-
-- Convertir salida JSON en objetos `BrowserElement`: hecho.
-- Detectar refs `e1`/`@e1`: hecho.
-- Falta filtrar/rankear elementos interactivos: textbox, button, link, menuitem.
-- Falta mantener URL/título/snapshot timestamp en memoria local.
-
-### 3. Action selector
-
-- Para instrucciones simples, elegir refs con heurísticas:
-  - campo search/email/message por label/role/text.
-  - botón play/send/search por role/name.
-- Para instrucciones ambiguas, preguntar al usuario.
-- Más adelante, usar LLM local/MiniMax para decidir refs.
-
-### 4. YouTube Music adapter
-
-- Abrir app/PWA.
-- Snapshot.
-- Encontrar campo de búsqueda.
-- Fill con canción/artista.
-- Press Enter.
-- Snapshot resultados.
-- Click resultado más probable.
-- Verificar reproducción.
-
-### 5. Messenger/Instagram draft adapter
-
-- Abrir página.
-- Snapshot.
-- Buscar contacto/conversación.
-- Preparar texto en input.
-- No enviar hasta confirmación explícita.
-- Después de confirmar, click/press send y verificar.
-
-### 6. Voz y control nativo
-
-- Probar `say --execute` con `spd-say`.
-- STT one-shot ya probado; falta push-to-talk/wake-word.
-- Validar KWin/D-Bus/AT-SPI para enfocar ventanas.
-
-### 7. Daemon + voz
-
-- Proceso background.
-- Wake word local.
-- STT tras wake word.
-- TTS de respuesta.
-- Indicador de micrófono y kill switch.
-
-### 8. Notificaciones, foco y resumen
-
-- Modelo `NotificationEvent`: hecho.
-- Normalización web/nativa: hecho.
-- Reglas de app/fuente (`announce`, `queue`, `ignore`, `metadata_only`): hecho.
-- Modos `normal`, `focus`, `game`, `private`: hecho.
-- SQLite local para eventos/reglas/modo: hecho.
-- TTS para anuncios: hecho en scaffold.
-- Resumen de cola, marcado como anunciado, parser de `Notify` y comando D-Bus inicial: hecho.
-- Listener D-Bus ejecutable con `notifications-listen`: hecho.
-- Intents de voz para modo juego, silenciar y resumen: hecho.
-- Listar/limpiar memoria local: hecho.
-- Reply draft web con agent-browser, confirmación, texto desde `--message`/`--audio-path` y selector automático desde snapshot JSON: hecho.
-- Servicio systemd de usuario para listener: hecho.
-- Grabación directa desde reply workflow: hecho.
-- Marcado manual `replied`/`dismissed`: hecho.
-- Smoke plan/simulación local: hecho.
-- Falta ajustar selector con snapshots reales y adapters nativos app por app.
+### Endurecimiento (Fase 5)
+- Panel de permisos, audit log, kill switch, modo privado.
 
 ## Regla de seguridad
 
-Eclipse puede preparar acciones, pero no debe enviar mensajes, publicar, borrar, instalar, commitear, hacer push o desplegar sin confirmación explícita.
+Eclipse puede preparar acciones, pero no debe enviar mensajes, publicar, borrar, instalar,
+commitear, hacer push ni desplegar sin confirmación explícita.

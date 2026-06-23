@@ -1,59 +1,26 @@
-# Estrategia de OpenClaw para Eclipse
+# OpenClaw: evaluación
 
-OpenClaw se tratará como alternativa y complemento, no como reemplazo inmediato de Eclipse.
+> **Estado: fuera del scope actual.** Eclipse es un runtime propio, Windows-only y
+> self-contained. OpenClaw se evaluó como infraestructura auxiliar (canales, plugins,
+> routing multi-agente) pero **no está integrado** y no es una dependencia.
 
-## Decisión inicial
+## Por qué Eclipse no se reemplaza por OpenClaw
 
-Construiremos un runtime propio para la experiencia principal de escritorio y evaluaremos OpenClaw para acelerar canales, plugins, automatizaciones y routing multi-agente.
+La experiencia central de Eclipse (wake word local, voz local, visión de pantalla,
+confirmaciones humanas, memoria local-first y proveedores intercambiables) está diseñada
+alrededor de seguridad de escritorio y control total de UX/permisos. Eso justifica un
+runtime propio.
 
-## Por qué no reemplazar Eclipse con OpenClaw
+## Dónde podría ayudar a futuro
 
-| Necesidad de Eclipse | Razón para runtime propio |
-|---|---|
-| Wake word “Eclipse” como experiencia central | Queremos control total de UX y permisos. |
-| Visión de pantalla y acciones locales | Deben estar diseñadas alrededor de seguridad desktop. |
-| Confirmaciones humanas | La UX debe ser explícita y auditable. |
-| Memoria personal local-first | Queremos política de privacidad propia. |
-| Modularidad de proveedores | No depender de una sola plataforma. |
+Si en algún momento se evalúa una integración, los candidatos serían: canales de mensajería
+(Telegram/WhatsApp/Slack/Discord), plugins/tools reutilizables, routing multi-agente o un
+dashboard. Cualquier integración tendría que:
 
-## Dónde sí puede ayudar OpenClaw
+- Aislarse de forma razonable.
+- No exigir credenciales personales en desarrollo.
+- Permitir auditar tools/plugins.
+- No romper el modelo safety-first de Eclipse.
 
-- Canales: Telegram, WhatsApp, Slack, Discord, etc.
-- Plugins/tools ya existentes.
-- Multi-agent routing.
-- Skills reutilizables.
-- Dashboard/control plane.
-- Experimentos de voz o realtime.
-
-## Opciones de integración
-
-| Opción | Uso | Cuándo elegirla |
-|---|---|---|
-| Referencia | Solo estudiamos ideas | Si el runtime no encaja o es riesgoso |
-| Bridge | Eclipse llama a OpenClaw para tareas concretas | Si canales/plugins funcionan bien |
-| Plugin | Eclipse se expone como skill/tool de OpenClaw | Si OpenClaw tiene buen dashboard/canales |
-| Reemplazo parcial | OpenClaw maneja agentes y Eclipse desktop tools | Solo si seguridad y DX son buenas |
-
-## Experimento controlado
-
-1. Instalar OpenClaw en entorno aislado.
-2. Crear credenciales de prueba.
-3. Activar solo un canal no sensible.
-4. Probar una tool inocua.
-5. Revisar logs y permisos.
-6. Documentar riesgos.
-7. Decidir integración.
-
-## Criterios de adopción
-
-OpenClaw puede entrar al proyecto si cumple:
-
-- Se puede aislar de forma razonable.
-- No obliga a usar credenciales personales en desarrollo.
-- Permite auditar tools/plugins.
-- No rompe el modelo safety-first de Eclipse.
-- Aporta valor claro frente a implementar directo.
-
-## Decisión provisional
-
-> Eclipse será el producto principal. OpenClaw será evaluado como infraestructura auxiliar para canales y plugins.
+Hasta que se cumpla y aporte valor claro, OpenClaw queda como referencia, no como parte del
+producto.

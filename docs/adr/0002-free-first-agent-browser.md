@@ -2,7 +2,13 @@
 
 ## Estado
 
-Aceptado — 2026-05-27
+**Parcialmente superado** — 2026-05-27 (aceptado), revisado tras la migración a Windows-only.
+
+La estrategia de automatización web (`agent-browser` como adapter, con dry-run y allowlist)
+**sigue vigente**. La parte de modelos cambió: ver [`MODEL_AND_VOICE_STRATEGY.md`](../MODEL_AND_VOICE_STRATEGY.md).
+Concretamente, MiniMax y los modos `free/budget/premium` quedaron reemplazados por una
+abstracción **provider-agnostic** (ollama/deepseek/openai), el TTS pasó de `spd-say`/`espeak`
+a SAPI de Windows, y `whisper.cpp` no se usó (se adoptó `faster-whisper`).
 
 ## Contexto
 
