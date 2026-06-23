@@ -24,6 +24,71 @@ DEFAULT_LOCAL_LLM_MODEL = "qwen2.5:7b"
 DEFAULT_LOCAL_VISION_MODEL = "qwen2.5vl:7b"
 DEFAULT_LOCAL_LLM_API_KEY = "ollama"
 
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+DEFAULT_PROVIDER = "ollama"
+
+
+class StructuredOutputMode(StrEnum):
+    """How a provider is asked to return the structured ActionPlan JSON."""
+
+    STRICT = "strict"  # OpenAI-style json_schema via chat.completions.parse
+    JSON_OBJECT = "json_object"  # json_object mode + schema in the prompt
+
+
+@dataclass(frozen=True)
+class LLMProvider:
+    """Preset describing one OpenAI-compatible LLM endpoint.
+
+    DeepSeek, Ollama and OpenAI all speak the OpenAI HTTP API, so a provider is
+    just data: where to connect, which model, and which structured-output mode
+    the endpoint actually supports.
+    """
+
+    name: str
+    base_url: str
+    default_model: str
+    api_key_env: str
+    structured_output_mode: StructuredOutputMode
+    supports_vision: bool
+
+
+PROVIDERS: dict[str, LLMProvider] = {
+    "ollama": LLMProvider(
+        name="ollama",
+        base_url=DEFAULT_LOCAL_LLM_BASE_URL,
+        default_model=DEFAULT_LOCAL_LLM_MODEL,
+        api_key_env="ECLIPSE_LLM_API_KEY",
+        structured_output_mode=StructuredOutputMode.STRICT,
+        supports_vision=True,
+    ),
+    "deepseek": LLMProvider(
+        name="deepseek",
+        base_url=DEFAULT_DEEPSEEK_BASE_URL,
+        default_model=DEFAULT_DEEPSEEK_MODEL,
+        api_key_env="DEEPSEEK_API_KEY",
+        structured_output_mode=StructuredOutputMode.JSON_OBJECT,
+        supports_vision=False,
+    ),
+    "openai": LLMProvider(
+        name="openai",
+        base_url=DEFAULT_OPENAI_BASE_URL,
+        default_model=DEFAULT_OPENAI_MODEL,
+        api_key_env="OPENAI_API_KEY",
+        structured_output_mode=StructuredOutputMode.STRICT,
+        supports_vision=True,
+    ),
+}
+
+
+def resolve_provider(name: str | None) -> LLMProvider:
+    """Return the provider preset for a name, falling back to the default."""
+
+    key = (name or DEFAULT_PROVIDER).strip().casefold()
+    return PROVIDERS.get(key, PROVIDERS[DEFAULT_PROVIDER])
+
 
 class ActionKind(StrEnum):
     """High-level action families that Eclipse can route to tools."""
@@ -156,6 +221,7 @@ class LLMPlannerConfig(BaseModel):
     api_key: str = DEFAULT_LOCAL_LLM_API_KEY
     timeout_seconds: float = Field(default=30.0, gt=0)
     max_tokens: int = Field(default=1500, gt=0)
+    structured_output_mode: StructuredOutputMode = StructuredOutputMode.STRICT
 
 
 OpenAICompatiblePlannerConfig = LLMPlannerConfig
@@ -308,7 +374,19 @@ class LLMPlanner:
         available_tools: Sequence[AvailableTool] = (),
         semantic_context: Sequence[str] = (),
     ) -> ActionPlan:
-        """Create a validated plan using SDK-native Pydantic Structured Outputs."""
+        """Create a validated plan using the provider's structured-output mode."""
+
+        if self.config.structured_output_mode is StructuredOutputMode.JSON_OBJECT:
+            return self._create_via_json_mode(instruction, available_tools, semantic_context)
+        return self._create_via_strict_parse(instruction, available_tools, semantic_context)
+
+    def _create_via_strict_parse(
+        self,
+        instruction: str,
+        available_tools: Sequence[AvailableTool],
+        semantic_context: Sequence[str],
+    ) -> ActionPlan:
+        """Use SDK-native Pydantic Structured Outputs (OpenAI/Ollama)."""
 
         completion = self.client.chat.completions.parse(  # type: ignore[attr-defined]
             model=self.config.model,
@@ -324,16 +402,50 @@ class LLMPlanner:
         message = completion.choices[0].message
         refusal = getattr(message, "refusal", None)
         if refusal:
-            raise ValueError(f"Local LLM refused to create an action plan: {refusal}")
+            raise ValueError(f"LLM refused to create an action plan: {refusal}")
         parsed = getattr(message, "parsed", None)
         if isinstance(parsed, ActionPlan):
             return parsed
         if isinstance(parsed, dict):
             return ActionPlan.model_validate(parsed)
-        content = getattr(message, "content", None)
+        return self._plan_from_content(getattr(message, "content", None))
+
+    def _create_via_json_mode(
+        self,
+        instruction: str,
+        available_tools: Sequence[AvailableTool],
+        semantic_context: Sequence[str],
+    ) -> ActionPlan:
+        """Use JSON-object mode with the schema in the prompt (DeepSeek).
+
+        DeepSeek does not support strict json_schema structured outputs, so the
+        ActionPlan schema is injected into the prompt and the JSON response is
+        validated manually with Pydantic.
+        """
+
+        completion = self.client.chat.completions.create(  # type: ignore[attr-defined]
+            model=self.config.model,
+            messages=build_llm_planner_messages(
+                instruction=instruction,
+                available_tools=available_tools,
+                semantic_context=semantic_context,
+                json_schema=ActionPlan.model_json_schema(),
+            ),
+            response_format={"type": "json_object"},
+            temperature=0,
+            max_tokens=self.config.max_tokens,
+        )
+        message = completion.choices[0].message
+        refusal = getattr(message, "refusal", None)
+        if refusal:
+            raise ValueError(f"LLM refused to create an action plan: {refusal}")
+        return self._plan_from_content(getattr(message, "content", None))
+
+    @staticmethod
+    def _plan_from_content(content: object) -> ActionPlan:
         if isinstance(content, str) and content.strip():
             return ActionPlan.model_validate_json(_strip_json_fences(content))
-        raise ValueError("Local LLM did not return a structured ActionPlan.")
+        raise ValueError("LLM did not return a structured ActionPlan.")
 
 
 class HybridPlanner:
@@ -426,16 +538,30 @@ def build_planner_config_from_env(
     model: str | None,
     api_key: str | None = None,
     api_key_env: str | None = None,
+    provider: str | None = None,
 ) -> LLMPlannerConfig:
-    """Build local LLM planner config from CLI values and environment defaults."""
+    """Build planner config from CLI values, a provider preset, and environment.
+
+    The provider preset (ollama by default) supplies the base URL, default model,
+    API-key environment variable, and structured-output mode. Explicit CLI values
+    and ECLIPSE_LLM_* environment variables override the preset.
+    """
+
+    preset = resolve_provider(provider or os.environ.get("ECLIPSE_LLM_PROVIDER"))
 
     resolved_key = api_key
     if not resolved_key and api_key_env:
         resolved_key = os.environ.get(api_key_env)
+    if not resolved_key:
+        resolved_key = os.environ.get(preset.api_key_env)
+    if not resolved_key:
+        resolved_key = os.environ.get("ECLIPSE_LLM_API_KEY", DEFAULT_LOCAL_LLM_API_KEY)
+
     return LLMPlannerConfig(
-        base_url=endpoint_url or os.environ.get("ECLIPSE_LLM_BASE_URL", DEFAULT_LOCAL_LLM_BASE_URL),
-        model=model or os.environ.get("ECLIPSE_LLM_MODEL", DEFAULT_LOCAL_LLM_MODEL),
-        api_key=resolved_key or os.environ.get("ECLIPSE_LLM_API_KEY", DEFAULT_LOCAL_LLM_API_KEY),
+        base_url=endpoint_url or os.environ.get("ECLIPSE_LLM_BASE_URL") or preset.base_url,
+        model=model or os.environ.get("ECLIPSE_LLM_MODEL") or preset.default_model,
+        api_key=resolved_key,
+        structured_output_mode=preset.structured_output_mode,
     )
 
 
@@ -491,16 +617,29 @@ def build_llm_planner_messages(
     instruction: str,
     available_tools: Sequence[AvailableTool],
     semantic_context: Sequence[str],
+    json_schema: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
-    """Build local LLM messages for structured planning."""
+    """Build LLM messages for structured planning.
 
+    When ``json_schema`` is provided (json_object mode), the schema is appended to
+    the system prompt so providers without strict structured-output support still
+    return a conforming JSON object.
+    """
+
+    system_content = STRUCTURED_PLANNER_SYSTEM_PROMPT
+    if json_schema is not None:
+        system_content = (
+            f"{system_content}\n"
+            "Return ONLY a single JSON object that conforms to this JSON schema:\n"
+            f"{json.dumps(json_schema, ensure_ascii=False)}"
+        )
     user_payload = {
         "instruction": instruction,
         "available_tools": [tool.model_dump(mode="json") for tool in available_tools],
         "semantic_context": list(semantic_context),
     }
     return [
-        {"role": "system", "content": STRUCTURED_PLANNER_SYSTEM_PROMPT},
+        {"role": "system", "content": system_content},
         {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
     ]
 

@@ -55,6 +55,7 @@ from eclipse_agent.notifications import (
     render_notification_processing_result,
 )
 from eclipse_agent.planner import (
+    PROVIDERS,
     LLMPlannerConfig,
     build_planner_config_from_env,
     create_action_plan,
@@ -678,14 +679,20 @@ def _add_notification_store_arg(parser: argparse.ArgumentParser) -> None:
 
 def _add_planner_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--provider",
+        default=None,
+        choices=sorted(PROVIDERS),
+        help="LLM provider preset. Defaults to ECLIPSE_LLM_PROVIDER or ollama.",
+    )
+    parser.add_argument(
         "--planner-endpoint",
         default=None,
-        help="OpenAI-compatible local LLM base URL. Defaults to Ollama on localhost.",
+        help="OpenAI-compatible LLM base URL. Overrides the provider preset.",
     )
     parser.add_argument(
         "--planner-model",
         default=None,
-        help="Local LLM model name. Defaults to qwen2.5:7b.",
+        help="LLM model name. Overrides the provider preset default.",
     )
     parser.add_argument(
         "--planner-api-key",
@@ -1260,6 +1267,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
 
 def main(argv: list[str] | None = None) -> int:
     _ensure_utf8_output()
+    _load_dotenv()
     args = build_parser().parse_args(argv)
     handler = _COMMAND_HANDLERS.get(args.command)
     if handler is None:
@@ -1278,6 +1286,16 @@ def _build_router(args: argparse.Namespace) -> ToolRouter:
     if getattr(args, "mcp_config", None):
         return ToolRouter.from_config_file(args.mcp_config)
     return ToolRouter(mcp_client=NativeMCPClient())
+
+
+def _load_dotenv() -> None:
+    """Load a local .env file so provider keys and overrides are picked up."""
+
+    try:
+        from dotenv import load_dotenv
+    except ModuleNotFoundError:
+        return
+    load_dotenv()
 
 
 def _ensure_utf8_output() -> None:
@@ -1299,6 +1317,7 @@ def _planner_config(args: argparse.Namespace) -> LLMPlannerConfig:
         model=args.planner_model,
         api_key=args.planner_api_key,
         api_key_env=args.planner_api_key_env,
+        provider=getattr(args, "provider", None),
     )
 
 

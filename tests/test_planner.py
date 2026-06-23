@@ -8,6 +8,7 @@ from eclipse_agent.planner import (
     LLMPlanner,
     LLMPlannerConfig,
     PlannedAction,
+    StructuredOutputMode,
     VisionAdapter,
     VisionAdapterConfig,
     build_vision_config_from_env,
@@ -254,6 +255,67 @@ def test_build_planner_config_defaults_to_ollama_qwen(monkeypatch):
     assert config.base_url == "http://localhost:11434/v1"
     assert config.model == "qwen2.5:7b"
     assert config.api_key == "ollama"
+    assert config.structured_output_mode is StructuredOutputMode.STRICT
+
+
+def test_build_planner_config_resolves_deepseek_provider(monkeypatch):
+    for var in (
+        "ECLIPSE_LLM_BASE_URL",
+        "ECLIPSE_LLM_MODEL",
+        "ECLIPSE_LLM_API_KEY",
+        "ECLIPSE_LLM_PROVIDER",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-test")
+
+    config = build_planner_config_from_env(
+        endpoint_url=None,
+        model=None,
+        api_key=None,
+        api_key_env="ECLIPSE_LLM_API_KEY",
+        provider="deepseek",
+    )
+
+    assert config.base_url == "https://api.deepseek.com"
+    assert config.model == "deepseek-chat"
+    assert config.api_key == "sk-deepseek-test"
+    assert config.structured_output_mode is StructuredOutputMode.JSON_OBJECT
+
+
+class FakeJsonModeMessage:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.refusal = None
+        self.parsed = None
+
+
+class FakeJsonModeCompletions:
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return FakeCompletion(choices=[FakeChoice(message=FakeJsonModeMessage(self.content))])
+
+
+class FakeJsonModeClient:
+    def __init__(self, content: str) -> None:
+        self.chat = type("Chat", (), {"completions": FakeJsonModeCompletions(content)})()
+
+
+def test_llm_planner_json_mode_validates_content_without_strict_parse():
+    plan = _smart_browser_plan("Open calendar")
+    client = FakeJsonModeClient(plan.model_dump_json())
+    config = LLMPlannerConfig(structured_output_mode=StructuredOutputMode.JSON_OBJECT)
+    planner = LLMPlanner(config, client=client)
+
+    result = planner.create_action_plan("Open my calendar")
+
+    assert result.actions[0].tool_name == "browser.open_url"
+    call = client.chat.completions.calls[0]
+    assert call["response_format"] == {"type": "json_object"}
+    assert "JSON schema" in call["messages"][0]["content"]
 
 
 def test_build_vision_config_defaults_to_ollama_qwen_vl(monkeypatch):
