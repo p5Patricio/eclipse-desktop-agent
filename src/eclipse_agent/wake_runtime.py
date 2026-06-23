@@ -13,6 +13,30 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+from eclipse_agent.notification_intents import (
+    NotificationVoiceIntentKind,
+    NotificationVoiceIntentResult,
+    execute_notification_voice_intent,
+    parse_notification_voice_intent,
+)
+from eclipse_agent.notifications import NotificationStore
+from eclipse_agent.planner import create_action_plan
+from eclipse_agent.response_formatter import ActionResponseFormatter
+from eclipse_agent.tool_router import (
+    NativeMCPClient,
+    ToolExecutionContext,
+    ToolExecutionResult,
+    ToolRouter,
+)
+from eclipse_agent.voice import (
+    ListenOnce,
+    ListenResult,
+    OpenWakeWordTrigger,
+    SpeechResult,
+    SystemTTS,
+    WakeWordDetectionResult,
+)
+
 
 class StatusHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the status API."""
@@ -35,26 +59,6 @@ class StatusHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass
-
-
-from eclipse_agent.notification_intents import (
-    NotificationVoiceIntentKind,
-    NotificationVoiceIntentResult,
-    execute_notification_voice_intent,
-    parse_notification_voice_intent,
-)
-from eclipse_agent.notifications import NotificationStore
-from eclipse_agent.planner import create_action_plan
-from eclipse_agent.response_formatter import ActionResponseFormatter
-from eclipse_agent.tool_router import NativeMCPClient, ToolExecutionContext, ToolExecutionResult, ToolRouter
-from eclipse_agent.voice import (
-    ListenOnce,
-    ListenResult,
-    OpenWakeWordTrigger,
-    SpeechResult,
-    SystemTTS,
-    WakeWordDetectionResult,
-)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -151,7 +155,9 @@ class WakeRuntime:
             pass
 
     def _start_status_server(self) -> None:
-        handler = lambda *args, **kwargs: StatusHandler(*args, runtime=self, **kwargs)
+        def handler(*args, **kwargs):
+            return StatusHandler(*args, runtime=self, **kwargs)
+
         self._http_server = HTTPServer(("127.0.0.1", 11438), handler)
         self._server_thread = threading.Thread(target=self._http_server.serve_forever, daemon=True)
         self._server_thread.start()

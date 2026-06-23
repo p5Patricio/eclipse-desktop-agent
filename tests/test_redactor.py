@@ -1,6 +1,4 @@
-import sys
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import patch
 from PIL import Image, ImageDraw
 
 from eclipse_agent.safety.redactor import redact_screenshot

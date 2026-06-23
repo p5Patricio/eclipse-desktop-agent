@@ -16,7 +16,7 @@ from eclipse_agent.planner import (
     create_local_fallback_action_plan,
 )
 from eclipse_agent.safety import RiskLevel
-from eclipse_agent.telemetry import ExecutionTelemetryStore, TelemetryLayer
+from eclipse_agent.telemetry import ExecutionTelemetryStore
 
 
 @dataclass

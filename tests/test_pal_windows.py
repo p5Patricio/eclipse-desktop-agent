@@ -1,6 +1,5 @@
 import sys
 from unittest.mock import MagicMock, patch
-import pytest
 from eclipse_agent.pal.windows.window_manager import WindowsWindowManager
 from eclipse_agent.pal.windows.input import WindowsInputSynthesizer
 from eclipse_agent.pal.windows.launcher import WindowsAppLauncher
@@ -122,7 +121,7 @@ def test_windows_screen_capture():
         mock_grab.assert_called_once_with(bbox=None)
 
     # Test selected region
-    with patch("PIL.ImageGrab.grab", mock_grab) as mock_grab_reg:
+    with patch("PIL.ImageGrab.grab", mock_grab):
         res_reg = cap.capture_selected_region(dry_run=False)
         assert res_reg.success is True
 

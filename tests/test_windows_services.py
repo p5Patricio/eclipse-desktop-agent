@@ -1,5 +1,3 @@
-import sys
-import pytest
 from unittest.mock import MagicMock
 from eclipse_agent.pal.windows.launcher import WindowsAppLauncher
 from eclipse_agent.pal.windows.voice import WindowsTTSProvider

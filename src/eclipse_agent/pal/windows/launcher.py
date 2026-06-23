@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Iterable
 from eclipse_agent.pal.base import AppLauncher
 from eclipse_agent.desktop_control import DesktopLaunchResult
 

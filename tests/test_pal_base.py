@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 
 def test_pal_interfaces_exist_and_are_abstract():
     # Attempt to import interfaces from eclipse_agent.pal.base

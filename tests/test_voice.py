@@ -8,7 +8,6 @@ from eclipse_agent.voice import (
     OpenWakeWordTrigger,
     SystemTTS,
     TTSProvider,
-    default_wake_word_model_path,
     normalize_spoken_text,
 )
 

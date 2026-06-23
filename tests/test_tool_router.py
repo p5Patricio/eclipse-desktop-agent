@@ -326,11 +326,19 @@ def test_native_google_search_encodes_query_and_returns_user_facts(monkeypatch):
 
 
 def test_native_google_search_rejects_empty_query_without_opening(monkeypatch):
-    calls: list[list[str]] = []
-    monkeypatch.setattr(
-        "eclipse_agent.tool_router.subprocess.run",
-        lambda argv, **kwargs: calls.append(argv),
-    )
+    from eclipse_agent.pal.factory import PlatformFactory
+    from eclipse_agent.desktop_control import DesktopLaunchResult
+
+    calls: list[str] = []
+
+    class _RecordingLauncher:
+        def launch(self, app_name, args=(), *, dry_run=True):
+            calls.append(app_name)
+            return DesktopLaunchResult(
+                success=True, app_name=app_name, command=(), message="", dry_run=dry_run
+            )
+
+    monkeypatch.setattr(PlatformFactory, "get_app_launcher", lambda: _RecordingLauncher())
     action = PlannedAction(
         id="search-1",
         kind=ActionKind.GOOGLE_SEARCH,
@@ -398,11 +406,19 @@ def test_native_app_launch_uses_allowlisted_argv_and_structured_result(monkeypat
 
 
 def test_native_app_launch_rejects_unsupported_app_without_execution(monkeypatch):
-    calls: list[list[str]] = []
-    monkeypatch.setattr(
-        "eclipse_agent.tool_router.subprocess.run",
-        lambda argv, **kwargs: calls.append(argv),
-    )
+    from eclipse_agent.pal.factory import PlatformFactory
+    from eclipse_agent.desktop_control import DesktopLaunchResult
+
+    calls: list[str] = []
+
+    class _RecordingLauncher:
+        def launch(self, app_name, args=(), *, dry_run=True):
+            calls.append(app_name)
+            return DesktopLaunchResult(
+                success=True, app_name=app_name, command=(), message="", dry_run=dry_run
+            )
+
+    monkeypatch.setattr(PlatformFactory, "get_app_launcher", lambda: _RecordingLauncher())
     action = PlannedAction(
         id="app-1",
         kind=ActionKind.OPEN_DESKTOP_APP,
@@ -428,11 +444,19 @@ def test_native_app_launch_rejects_unsupported_app_without_execution(monkeypatch
 
 
 def test_native_app_launch_rejects_ambiguous_allowlisted_targets_without_execution(monkeypatch):
-    calls: list[list[str]] = []
-    monkeypatch.setattr(
-        "eclipse_agent.tool_router.subprocess.run",
-        lambda argv, **kwargs: calls.append(argv),
-    )
+    from eclipse_agent.pal.factory import PlatformFactory
+    from eclipse_agent.desktop_control import DesktopLaunchResult
+
+    calls: list[str] = []
+
+    class _RecordingLauncher:
+        def launch(self, app_name, args=(), *, dry_run=True):
+            calls.append(app_name)
+            return DesktopLaunchResult(
+                success=True, app_name=app_name, command=(), message="", dry_run=dry_run
+            )
+
+    monkeypatch.setattr(PlatformFactory, "get_app_launcher", lambda: _RecordingLauncher())
     action = PlannedAction(
         id="app-ambiguous",
         kind=ActionKind.OPEN_DESKTOP_APP,
@@ -456,11 +480,19 @@ def test_native_app_launch_rejects_ambiguous_allowlisted_targets_without_executi
 
 
 def test_native_app_launch_rejects_shell_like_multi_token_alias_without_execution(monkeypatch):
-    calls: list[list[str]] = []
-    monkeypatch.setattr(
-        "eclipse_agent.tool_router.subprocess.run",
-        lambda argv, **kwargs: calls.append(argv),
-    )
+    from eclipse_agent.pal.factory import PlatformFactory
+    from eclipse_agent.desktop_control import DesktopLaunchResult
+
+    calls: list[str] = []
+
+    class _RecordingLauncher:
+        def launch(self, app_name, args=(), *, dry_run=True):
+            calls.append(app_name)
+            return DesktopLaunchResult(
+                success=True, app_name=app_name, command=(), message="", dry_run=dry_run
+            )
+
+    monkeypatch.setattr(PlatformFactory, "get_app_launcher", lambda: _RecordingLauncher())
     action = PlannedAction(
         id="app-shell-like",
         kind=ActionKind.OPEN_DESKTOP_APP,

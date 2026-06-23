@@ -282,7 +282,8 @@ def test_wake_runtime_status_http_api(tmp_path, monkeypatch):
     from eclipse_agent.wake_runtime import StatusHandler
     
     def real_start_server(self):
-        handler = lambda *args, **kwargs: StatusHandler(*args, runtime=self, **kwargs)
+        def handler(*args, **kwargs):
+            return StatusHandler(*args, runtime=self, **kwargs)
         self._http_server = HTTPServer(("127.0.0.1", 11438), handler)
         self._server_thread = threading.Thread(target=self._http_server.serve_forever, daemon=True)
         self._server_thread.start()

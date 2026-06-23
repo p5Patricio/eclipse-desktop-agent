@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 import ctypes
-from ctypes import Structure, Union, c_ulong, c_short, c_ushort, c_long, pointer, sizeof
+from ctypes import Structure, Union, c_ulong, c_ushort, c_long, pointer, sizeof
 from eclipse_agent.pal.base import InputSynthesizer
 
 @dataclass(frozen=True)
