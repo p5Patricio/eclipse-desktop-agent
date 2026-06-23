@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -61,7 +62,12 @@ from eclipse_agent.planner import (
 from eclipse_agent.resources import estimate_resource_profile
 from eclipse_agent.runtime_diagnostics import collect_runtime_diagnostics
 from eclipse_agent.telemetry import ExecutionTelemetryStore, render_telemetry_summary
-from eclipse_agent.tool_router import ToolExecutionContext, ToolRouter, render_tool_results
+from eclipse_agent.tool_router import (
+    NativeMCPClient,
+    ToolExecutionContext,
+    ToolRouter,
+    render_tool_results,
+)
 from eclipse_agent.voice import ListenOnce, LocalWhisperSTT, OpenWakeWordTrigger, SystemTTS
 from eclipse_agent.voice import render_listen_result, render_speech_result
 from eclipse_agent.wake_runtime import (
@@ -1147,7 +1153,7 @@ def _cmd_notifications_reply_draft(args: argparse.Namespace) -> int:
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
-    router = ToolRouter.from_config_file(args.mcp_config)
+    router = _build_router(args)
     print(
         create_action_plan(
             args.instruction,
@@ -1161,7 +1167,7 @@ def _cmd_plan(args: argparse.Namespace) -> int:
 
 
 def _cmd_route_plan(args: argparse.Namespace) -> int:
-    router = ToolRouter.from_config_file(args.mcp_config)
+    router = _build_router(args)
     plan = create_action_plan(
         args.instruction,
         llm_config=_planner_config(args),
@@ -1253,6 +1259,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    _ensure_utf8_output()
     args = build_parser().parse_args(argv)
     handler = _COMMAND_HANDLERS.get(args.command)
     if handler is None:
@@ -1263,6 +1270,27 @@ def main(argv: list[str] | None = None) -> int:
 
 def _browser_plan_exit_code(status: BrowserActionStatus) -> int:
     return 0 if status in {BrowserActionStatus.PREPARED, BrowserActionStatus.EXECUTED} else 1
+
+
+def _build_router(args: argparse.Namespace) -> ToolRouter:
+    """Build a tool router. Without an MCP config, fall back to native local tools."""
+
+    if getattr(args, "mcp_config", None):
+        return ToolRouter.from_config_file(args.mcp_config)
+    return ToolRouter(mcp_client=NativeMCPClient())
+
+
+def _ensure_utf8_output() -> None:
+    """Force UTF-8 stdout/stderr so accented output renders on the Windows console."""
+
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8")
+        except (ValueError, OSError):
+            pass
 
 
 def _planner_config(args: argparse.Namespace) -> LLMPlannerConfig:
