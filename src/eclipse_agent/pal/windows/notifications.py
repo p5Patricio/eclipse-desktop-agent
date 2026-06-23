@@ -1,7 +1,6 @@
 import logging
 from dataclasses import dataclass
 from typing import Any
-import winrt.windows.ui.notifications.management as mgmt
 from eclipse_agent.pal.base import NotificationDaemon
 from eclipse_agent.notifications import NotificationCenter, NotificationEvent
 
@@ -34,7 +33,21 @@ class WindowsNotificationDaemon(NotificationDaemon):
                 message="Prepared Windows notification listener.",
                 dry_run=True,
             )
-            
+
+        try:
+            import winrt.windows.ui.notifications.management as mgmt
+        except ModuleNotFoundError:
+            return WindowsNotificationDaemonResult(
+                success=False,
+                processed=0,
+                message=(
+                    "Windows notification listener requires the winrt packages. "
+                    "Install them with: pip install -e .[notifications]"
+                ),
+                dry_run=False,
+                executed=False,
+            )
+
         listener = mgmt.UserNotificationListener.current
         access_status = listener.get_access_status()
         

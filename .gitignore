@@ -9,6 +9,9 @@ htmlcov/
 .venv/
 venv/
 .venv-wake/
+*.egg-info/
+build/
+dist/
 
 # Local secrets/config
 .env

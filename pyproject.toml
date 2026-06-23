@@ -10,13 +10,20 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Patricio" }]
+classifiers = [
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+]
 dependencies = [
-  "lancedb>=0.22",
   "mcp>=1.9",
   "openai>=1.55",
   "openwakeword>=0.6",
   "pydantic>=2.8",
   "sounddevice>=0.4",
+  "soundfile>=0.13",
+  "numpy>=1.26",
+  "Pillow>=10.0",
+  "pywin32>=306",
 ]
 
 [project.optional-dependencies]
@@ -26,7 +33,9 @@ dev = [
 ]
 voice = [
   "faster-whisper>=1.2",
-  "sounddevice>=0.4",
+]
+notifications = [
+  "winrt-Windows.UI.Notifications.Management>=2.0",
 ]
 wakeword-training = [
   "acoustics>=0.2.6",

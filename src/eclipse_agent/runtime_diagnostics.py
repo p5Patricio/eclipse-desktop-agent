@@ -44,7 +44,11 @@ def collect_runtime_diagnostics() -> RuntimeDiagnostics:
 
     capabilities = (
         _python_module_status("win32gui", "Windows window management via win32gui."),
-        _python_module_status("winsdk", "Windows Runtime/winsdk API integration."),
+        _python_module_status(
+            "winrt.windows.ui.notifications.management",
+            "Windows notification listener via winrt.",
+            next_step="Install the listener extra: pip install -e .[notifications]",
+        ),
         _python_module_status("sounddevice", "Audio recording via sounddevice."),
         _sapi_tts_status(),
         _python_module_status(

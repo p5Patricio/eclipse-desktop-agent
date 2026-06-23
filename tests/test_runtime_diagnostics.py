@@ -26,7 +26,12 @@ def test_collect_runtime_diagnostics_on_windows(monkeypatch):
     import importlib.util
 
     def mock_find_spec(name, package=None):
-        if name in ("win32gui", "winsdk", "sounddevice", "faster_whisper"):
+        if name in (
+            "win32gui",
+            "winrt.windows.ui.notifications.management",
+            "sounddevice",
+            "faster_whisper",
+        ):
             class DummySpec:
                 pass
             return DummySpec()
@@ -46,7 +51,7 @@ def test_collect_runtime_diagnostics_on_windows(monkeypatch):
 
     # Verify that Windows-specific capabilities are present
     assert "win32gui" in names
-    assert "winsdk" in names
+    assert "winrt.windows.ui.notifications.management" in names
     assert "sounddevice" in names
     assert "sapi_tts" in names
 
