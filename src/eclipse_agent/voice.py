@@ -2,26 +2,17 @@
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import StrEnum
 from pathlib import Path
-from typing import Iterable, Protocol
+from typing import TYPE_CHECKING, Iterable, Protocol
+
+if TYPE_CHECKING:
+    from eclipse_agent.pal.base import AudioRecorder, TTSProvider
 
 DEFAULT_WAKE_WORD_MODEL_NAME = "eclipse.onnx"
-DEFAULT_PIPER_VOICE_MODEL = "es_MX-ald-medium.onnx"
-
-
-class TTSProvider(StrEnum):
-    """Supported local text-to-speech providers."""
-
-    PIPER = "piper"
-    SPD_SAY = "spd-say"
-    ESPEAK_NG = "espeak-ng"
 
 
 @dataclass(frozen=True)
@@ -102,13 +93,6 @@ class WakeWordDetectionResult:
     score: float = 0.0
 
 
-class CommandRunner(Protocol):
-    """Protocol for subprocess-compatible command runners."""
-
-    def __call__(self, command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        """Run a command and return its completed process."""
-
-
 class WakeWordModel(Protocol):
     """Protocol for openwakeword-compatible model objects."""
 
@@ -119,180 +103,34 @@ class WakeWordModel(Protocol):
 WakeWordModelFactory = Callable[..., WakeWordModel]
 
 
-class PiperTTS:
-    """High-quality neural TTS via the piper binary.
+class SystemTTS:
+    """Local text-to-speech via the Windows platform layer (SAPI).
 
-    Generates a WAV file via piper and plays it with aplay/pw-play.
-    Produces natural-sounding speech comparable to Siri/Alexa.
+    Delegates to the platform TTS provider. A provider can be injected for tests.
     """
 
-    provider = TTSProvider.PIPER
-
-    def __init__(
-        self,
-        model_path: str | Path | None = None,
-        runner: CommandRunner | None = None,
-    ) -> None:
-        self.model_path = Path(model_path).expanduser() if model_path else _default_piper_model_path()
-        self.runner = runner or _default_runner
-
-    def is_available(self) -> bool:
-        return bool(_find_piper()) and self.model_path.exists()
+    def __init__(self, provider: TTSProvider | None = None) -> None:
+        self._provider = provider
 
     def speak(self, text: str, *, dry_run: bool = True) -> SpeechResult:
-        normalized = normalize_spoken_text(text)
-        piper_bin = shutil.which("piper")
-        piper_bin = _find_piper()
-        if not piper_bin:
-            return SpeechResult(False, self.provider, (), "piper binary not found.", dry_run)
-        if not self.model_path.exists():
-            return SpeechResult(
-                False, self.provider, (),
-                f"Piper voice model not found: {self.model_path}.", dry_run,
-            )
-        audio_path = Path(tempfile.gettempdir()) / "eclipse-piper.wav"
-        piper_cmd = (piper_bin, "--model", str(self.model_path), "--output_file", str(audio_path))
-        play_cmd: tuple[str, ...]
-        if shutil.which("aplay"):
-            play_cmd = ("aplay", "-q", str(audio_path))
-        elif shutil.which("pw-play"):
-            play_cmd = ("pw-play", str(audio_path))
-        else:
-            return SpeechResult(False, self.provider, piper_cmd, "No audio player found (aplay/pw-play).", dry_run)
+        """Speak text using the Windows TTS provider."""
 
-        if dry_run:
-            return SpeechResult(True, self.provider, piper_cmd, "Prepared Piper neural TTS command.", True)
+        provider = self._provider
+        if provider is None:
+            from eclipse_agent.pal.factory import PlatformFactory
 
-        gen = subprocess.run(  # noqa: S603
-            list(piper_cmd), input=normalized, text=True, capture_output=True, check=False
-        )
-        if gen.returncode != 0:
-            return SpeechResult(False, self.provider, piper_cmd, gen.stderr.strip() or "Piper synthesis failed.", False)
-        play = self.runner(play_cmd)
-        if play.returncode != 0:
-            return SpeechResult(False, self.provider, play_cmd, play.stderr.strip() or "Audio playback failed.", False)
-        return SpeechResult(True, self.provider, piper_cmd, "Neural TTS spoken via Piper.", False, True)
-
-
-class SystemTTS:
-    """Local TTS wrapper. Prefers Piper (neural) when available, falls back to spd-say/espeak-ng."""
-
-    def __init__(
-        self,
-        preferred_provider: TTSProvider | str = TTSProvider.SPD_SAY,
-        runner: CommandRunner | None = None,
-        piper: PiperTTS | None = None,
-    ) -> None:
-        self.preferred_provider = TTSProvider(preferred_provider)
-        self.runner = runner or _default_runner
-        self._piper = piper if piper is not None else PiperTTS(runner=self.runner)
-
-    def build_command(self, text: str) -> tuple[str, ...]:
-        """Build a command for the first available local TTS provider."""
-
-        normalized = normalize_spoken_text(text)
-        provider = self.select_provider()
-        if provider is TTSProvider.SPD_SAY:
-            return (provider.value, normalized)
-        return (provider.value, "-v", "es-mx", normalized)
-
-    def select_provider(self) -> TTSProvider:
-        """Return the preferred provider if available, otherwise fallback."""
-
-        providers = (self.preferred_provider, TTSProvider.ESPEAK_NG, TTSProvider.SPD_SAY)
-        for provider in dict.fromkeys(providers):
-            if shutil.which(provider.value):
-                return provider
-        raise RuntimeError("No local TTS provider found. Install spd-say or espeak-ng.")
-
-    def speak(self, text: str, *, dry_run: bool = True) -> SpeechResult:
-        """Speak text locally. Uses Piper neural TTS when available, else spd-say/espeak-ng."""
-
-        import sys
-        if sys.platform == "win32" and type(self) is SystemTTS:
-            from eclipse_agent.pal.windows.voice import WindowsTTSProvider
-            return WindowsTTSProvider().speak(text, dry_run=dry_run)
-
-        if self._piper.is_available():
-            return self._piper.speak(text, dry_run=dry_run)
-
-        try:
-            command = self.build_command(text)
-        except ValueError as exc:
-            return SpeechResult(
-                success=False,
-                provider=self.preferred_provider.value,
-                command=(),
-                message=str(exc),
-                dry_run=dry_run,
-            )
-        except RuntimeError as exc:
-            return SpeechResult(
-                success=False,
-                provider="unavailable",
-                command=(),
-                message=str(exc),
-                dry_run=dry_run,
-            )
-
-        provider = command[0]
-        if dry_run:
-            return SpeechResult(
-                success=True,
-                provider=provider,
-                command=command,
-                message="Prepared local TTS command.",
-                dry_run=True,
-            )
-
-        completed = self.runner(command)
-        if completed.returncode != 0:
-            return SpeechResult(
-                success=False,
-                provider=provider,
-                command=command,
-                message=completed.stderr.strip() or "TTS command failed.",
-                dry_run=False,
-            )
-        return SpeechResult(
-            success=True,
-            provider=provider,
-            command=command,
-            message="Spoken response sent to local TTS.",
-            dry_run=False,
-            executed=True,
-        )
+            provider = PlatformFactory.get_tts_provider()
+        return provider.speak(text, dry_run=dry_run)
 
 
 class MicrophoneRecorder:
-    """Record short microphone clips with local Linux audio tools."""
+    """Record short microphone clips via the Windows platform layer.
 
-    def __init__(self, runner: CommandRunner | None = None) -> None:
-        self.runner = runner or _default_runner
+    Delegates to the platform audio recorder. A recorder can be injected for tests.
+    """
 
-    def build_record_command(self, audio_path: str | Path, *, seconds: int = 5) -> tuple[str, ...]:
-        """Build a 16 kHz mono WAV recording command."""
-
-        if seconds <= 0:
-            raise ValueError("Recording duration must be positive.")
-        output = Path(audio_path).expanduser()
-        if shutil.which("arecord"):
-            return (
-                "arecord",
-                "-q",
-                "-f",
-                "S16_LE",
-                "-r",
-                "16000",
-                "-c",
-                "1",
-                "-d",
-                str(seconds),
-                str(output),
-            )
-        if shutil.which("pw-record"):
-            return ("pw-record", "--rate", "16000", "--channels", "1", str(output))
-        raise RuntimeError("No microphone recorder found. Install alsa-utils or pipewire tools.")
+    def __init__(self, recorder: AudioRecorder | None = None) -> None:
+        self._recorder = recorder
 
     def record(
         self,
@@ -303,24 +141,12 @@ class MicrophoneRecorder:
     ) -> RecordingResult:
         """Prepare or record a short microphone clip."""
 
-        import sys
-        if sys.platform == "win32" and type(self) is MicrophoneRecorder:
-            from eclipse_agent.pal.windows.voice import WindowsAudioRecorder
-            return WindowsAudioRecorder().record(audio_path, seconds=seconds, dry_run=dry_run)
+        recorder = self._recorder
+        if recorder is None:
+            from eclipse_agent.pal.factory import PlatformFactory
 
-        path = Path(audio_path).expanduser()
-        try:
-            command = self.build_record_command(path, seconds=seconds)
-        except (RuntimeError, ValueError) as exc:
-            return RecordingResult(False, (), path, str(exc), dry_run=dry_run)
-        if dry_run:
-            return RecordingResult(True, command, path, "Prepared microphone recording.", True)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        completed = self.runner(command)
-        if completed.returncode != 0:
-            message = completed.stderr.strip() or "Microphone recording failed."
-            return RecordingResult(False, command, path, message, dry_run=False)
-        return RecordingResult(True, command, path, "Microphone audio recorded.", False, True)
+            recorder = PlatformFactory.get_audio_recorder()
+        return recorder.record(audio_path, seconds=seconds, dry_run=dry_run)
 
 
 class LocalWhisperSTT:
@@ -743,23 +569,6 @@ def _default_audio_path() -> Path:
     return Path(tempfile.gettempdir()) / "eclipse-listen.wav"
 
 
-def default_piper_model_path() -> Path:
-    """Return the designated Piper voice model path for Eclipse."""
-
-    explicit = _path_from_env("ECLIPSE_PIPER_MODEL_PATH")
-    if explicit:
-        return explicit
-    models_dir = _path_from_env("ECLIPSE_MODELS_DIR")
-    if models_dir:
-        return models_dir / DEFAULT_PIPER_VOICE_MODEL
-    project_root = Path(__file__).resolve().parents[2]
-    return project_root / "models" / DEFAULT_PIPER_VOICE_MODEL
-
-
-def _default_piper_model_path() -> Path:
-    return default_piper_model_path()
-
-
 def default_wake_word_model_path() -> Path:
     """Return the designated custom openwakeword model path for the Eclipse phrase."""
 
@@ -773,10 +582,6 @@ def default_wake_word_model_path() -> Path:
 
     project_root = Path(__file__).resolve().parents[2]
     return project_root / "models" / DEFAULT_WAKE_WORD_MODEL_NAME
-
-
-def _default_runner(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, text=True, capture_output=True, check=False)  # noqa: S603
 
 
 def _path_from_env(name: str) -> Path | None:
@@ -794,18 +599,6 @@ def shlex_join(command: tuple[str, ...]) -> str:
     import shlex
 
     return shlex.join(command)
-
-
-def _find_piper() -> str | None:
-    """Find the piper binary in PATH or alongside the running Python executable."""
-
-    import sys
-
-    found = shutil.which("piper")
-    if found:
-        return found
-    candidate = Path(sys.executable).parent / "piper"
-    return str(candidate) if candidate.exists() else None
 
 
 def _best_prediction(prediction: dict[str, float]) -> tuple[str, float]:
