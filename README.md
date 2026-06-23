@@ -3,10 +3,10 @@
 > Asistente de voz para Windows, estilo Jarvis — la voz corre local, el cerebro es
 > intercambiable (DeepSeek o modelo local), y cada acción sensible pide confirmación.
 
+![CI](https://github.com/p5Patricio/eclipse-desktop-agent/actions/workflows/ci.yml/badge.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Lint](https://img.shields.io/badge/lint-ruff-261230)
 
 Eclipse es un **asistente personal de escritorio para Windows**, estilo Jarvis: vive en
 segundo plano, despierta con una palabra de activación, entiende lo que le pedís, prepara
