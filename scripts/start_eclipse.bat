@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 set SCRIPT_DIR=%~dp0
 for %%i in ("%SCRIPT_DIR%..") do set REPO_ROOT=%%~fi
 
-if not defined ECLIPSE_PYTHON set ECLIPSE_PYTHON=%REPO_ROOT%\.venv-wake\Scripts\python.exe
+if not defined ECLIPSE_PYTHON set ECLIPSE_PYTHON=%REPO_ROOT%\.venv\Scripts\python.exe
 if not defined ECLIPSE_WAKE_THRESHOLD set ECLIPSE_WAKE_THRESHOLD=0.5
 if not defined ECLIPSE_WAKE_TIMEOUT_SECONDS set ECLIPSE_WAKE_TIMEOUT_SECONDS=
 if not defined ECLIPSE_COMMAND_SECONDS set ECLIPSE_COMMAND_SECONDS=5
@@ -16,7 +16,7 @@ if not defined ECLIPSE_STORE set ECLIPSE_STORE=
 
 if not exist "%ECLIPSE_PYTHON%" (
   echo Configured Python environment is missing or not executable: %ECLIPSE_PYTHON% >&2
-  echo Set ECLIPSE_PYTHON to the wake runtime Python, or create %REPO_ROOT%\.venv-wake. >&2
+  echo Set ECLIPSE_PYTHON to the wake runtime Python, or run scripts\setup.bat to create %REPO_ROOT%\.venv. >&2
   exit /b 2
 )
 
