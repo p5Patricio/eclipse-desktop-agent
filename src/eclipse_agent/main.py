@@ -31,6 +31,13 @@ from eclipse_agent.desktop_control import (
 )
 from eclipse_agent.answer import answer_question_from_env, render_answer_result
 from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
+from eclipse_agent.reminders import (
+    ReminderStore,
+    expires_after_seconds,
+    fire_due_reminders,
+    parse_reminder_request,
+    render_reminders,
+)
 from eclipse_agent.system_control import SystemAction, render_system_control_result
 from eclipse_agent.pal.factory import PlatformFactory
 from eclipse_agent.notification_intents import (
@@ -388,6 +395,30 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         choices=sorted(PROVIDERS),
         help="LLM provider preset. Defaults to ECLIPSE_LLM_PROVIDER or ollama.",
+    )
+
+    remind = subparsers.add_parser("remind", help="Set a reminder or timer.")
+    remind.add_argument(
+        "--text",
+        required=True,
+        help="Reminder text, or a phrase like 'en 10 minutos que saque la pizza'.",
+    )
+    remind.add_argument(
+        "--seconds",
+        type=int,
+        help="Delay in seconds. Overrides parsing the delay from --text.",
+    )
+
+    subparsers.add_parser("reminders-list", help="List pending reminders.")
+
+    reminders_check = subparsers.add_parser(
+        "reminders-check",
+        help="Fire reminders that are due now.",
+    )
+    reminders_check.add_argument(
+        "--speak",
+        action="store_true",
+        help="Actually speak due reminders instead of dry-running.",
     )
 
     notifications_ingest = subparsers.add_parser(
@@ -1046,6 +1077,42 @@ def _cmd_system(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _cmd_remind(args: argparse.Namespace) -> int:
+    store = ReminderStore()
+    if args.seconds is not None:
+        if args.seconds <= 0:
+            print("Reminder delay must be positive.")
+            return 1
+        reminder = store.add(args.text, expires_after_seconds(args.seconds))
+    else:
+        request = parse_reminder_request(args.text)
+        if request is None:
+            print("Could not find a delay. Use --seconds or include 'en N minutos'.")
+            return 1
+        reminder = store.add(request.text, expires_after_seconds(request.delay_seconds))
+    print(f"Reminder set for {reminder.due_at.isoformat()}: {reminder.text}")
+    return 0
+
+
+def _cmd_reminders_list(args: argparse.Namespace) -> int:
+    print(render_reminders(ReminderStore().list_pending()))
+    return 0
+
+
+def _cmd_reminders_check(args: argparse.Namespace) -> int:
+    tts = SystemTTS()
+    fired = fire_due_reminders(
+        ReminderStore(),
+        lambda text: tts.speak(text, dry_run=not args.speak),
+    )
+    if not fired:
+        print("No reminders are due.")
+        return 0
+    for reminder in fired:
+        print(f"Fired: {reminder.text}")
+    return 0
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
     print(render_answer_result(result))
@@ -1319,6 +1386,9 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "system": _cmd_system,
     "clipboard": _cmd_clipboard,
     "ask": _cmd_ask,
+    "remind": _cmd_remind,
+    "reminders-list": _cmd_reminders_list,
+    "reminders-check": _cmd_reminders_check,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

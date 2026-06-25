@@ -663,6 +663,31 @@ def test_native_answer_question_uses_llm(monkeypatch):
     assert result.structured_content["user_facts"]["spoken"] == "Es una planta."
 
 
+def test_native_set_reminder_stores_and_confirms(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    action = PlannedAction(
+        id="rem-1",
+        kind=ActionKind.SET_REMINDER,
+        description="Set a reminder.",
+        risk_level=RiskLevel.LOW,
+        target="reminder",
+        parameters={"reminder_text": "saque la pizza", "delay_seconds": 600},
+        tool_name="native.set_reminder",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action, ToolExecutionContext(dry_run=False)
+    )
+
+    assert result.success is True
+    assert result.structured_content["user_facts"]["spoken"] == "Listo, te lo recuerdo."
+
+    from eclipse_agent.reminders import ReminderStore
+
+    assert ReminderStore().list_pending()[0].text == "saque la pizza"
+
+
 def test_load_mcp_server_configs_reads_stdio_servers(tmp_path):
     path = tmp_path / "mcp-servers.json"
     path.write_text(

@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eclipse_agent.coding_agents import CODING_AGENTS, get_coding_agent
+from eclipse_agent.reminders import parse_reminder_request
 from eclipse_agent.safety import RiskLevel
 from eclipse_agent.telemetry import ExecutionTelemetryStore, TelemetryLayer
 
@@ -105,6 +106,7 @@ class ActionKind(StrEnum):
     SYSTEM_CONTROL = "system_control"
     READ_CLIPBOARD = "read_clipboard"
     ANSWER_QUESTION = "answer_question"
+    SET_REMINDER = "set_reminder"
     UNKNOWN = "unknown"
 
 
@@ -693,6 +695,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if coding_action:
         return (coding_action,)
 
+    reminder_action = _maybe_set_reminder_action(clause, lowered, start_index)
+    if reminder_action:
+        return (reminder_action,)
+
     system_action = _maybe_system_control_action(clause, lowered, start_index)
     if system_action:
         return (system_action,)
@@ -935,6 +941,29 @@ def _maybe_system_control_action(clause: str, lowered: str, index: int) -> Plann
         target=action,
         parameters={"system_action": action},
         tool_name="native.system_control",
+    )
+
+
+_REMINDER_TOKENS = (
+    "recordame", "recuérdame", "recuerdame", "recordatorio", "remind me",
+    "avisame", "avísame", "temporizador", "timer", "alarma",
+)
+
+
+def _maybe_set_reminder_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(token in lowered for token in _REMINDER_TOKENS):
+        return None
+    request = parse_reminder_request(clause)
+    if request is None:
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.SET_REMINDER,
+        description="Set a reminder or timer.",
+        risk_level=RiskLevel.LOW,
+        target="reminder",
+        parameters={"reminder_text": request.text, "delay_seconds": request.delay_seconds},
+        tool_name="native.set_reminder",
     )
 
 

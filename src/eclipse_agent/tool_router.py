@@ -199,6 +199,13 @@ class NativeMCPClient:
                 action_kinds=(ActionKind.ANSWER_QUESTION,),
                 risk_level=RiskLevel.LOW,
             ),
+            MCPToolDefinition(
+                name="set_reminder",
+                server_name="native",
+                description="Set a reminder or timer",
+                action_kinds=(ActionKind.SET_REMINDER,),
+                risk_level=RiskLevel.LOW,
+            ),
         )
 
     def call_tool(self, tool: MCPToolDefinition, arguments: dict[str, Any]) -> NativeToolResult:
@@ -216,6 +223,8 @@ class NativeMCPClient:
             return self._read_clipboard(arguments)
         if tool.name == "answer_question":
             return self._answer_question(arguments)
+        if tool.name == "set_reminder":
+            return self._set_reminder(arguments)
         return NativeToolResult(isError=True, _message=f"Unknown native tool: {tool.name}")
 
     def _open_url(self, arguments: dict[str, Any]) -> NativeToolResult:
@@ -343,6 +352,29 @@ class NativeMCPClient:
             action_type="system_control",
             target=action.value,
             reason=result.message,
+        )
+
+    def _set_reminder(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.reminders import ReminderStore, expires_after_seconds
+
+        text = str(arguments.get("reminder_text", "") or arguments.get("target", "")).strip()
+        try:
+            delay = int(arguments.get("delay_seconds") or 0)
+        except (TypeError, ValueError):
+            delay = 0
+        if delay <= 0:
+            return _native_failure(
+                action_type="set_reminder",
+                target="reminder",
+                reason="Tell me in how long, like in ten minutes.",
+            )
+        ReminderStore().add(text or "recordatorio", expires_after_seconds(delay))
+        spoken = "Listo, te lo recuerdo."
+        return _native_success(
+            action_type="set_reminder",
+            target="reminder",
+            message=spoken,
+            extra_facts={"spoken": spoken},
         )
 
     def _answer_question(self, arguments: dict[str, Any]) -> NativeToolResult:

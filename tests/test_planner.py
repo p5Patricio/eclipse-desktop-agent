@@ -213,6 +213,16 @@ def test_plans_lock_screen_as_medium_risk():
     assert action.risk_level is RiskLevel.MEDIUM
 
 
+def test_plans_reminder_as_set_reminder():
+    plan = create_action_plan("Eclipse, recordame en 10 minutos que saque la pizza")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.SET_REMINDER
+    assert action.tool_name == "native.set_reminder"
+    assert action.parameters["delay_seconds"] == 600
+    assert action.parameters["reminder_text"] == "saque la pizza"
+
+
 def test_plans_general_question_as_answer():
     plan = create_action_plan("Eclipse, qué es la fotosíntesis")
 
