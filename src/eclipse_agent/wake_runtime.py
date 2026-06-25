@@ -21,6 +21,7 @@ from eclipse_agent.notification_intents import (
 )
 from eclipse_agent.notifications import NotificationStore
 from eclipse_agent.planner import create_action_plan
+from eclipse_agent.reminders import ReminderStore, fire_due_reminders
 from eclipse_agent.response_formatter import ActionResponseFormatter
 from eclipse_agent.tool_router import (
     NativeMCPClient,
@@ -136,6 +137,7 @@ class WakeRuntime:
         router: ToolRouter | None = None,
         store: NotificationStore | None = None,
         response_formatter: ActionResponseFormatter | None = None,
+        reminder_store: ReminderStore | None = None,
     ) -> None:
         self.listener = listener
         self.listener_factory = listener_factory
@@ -144,11 +146,14 @@ class WakeRuntime:
         self.router = router or ToolRouter(mcp_client=NativeMCPClient())
         self.store = store or NotificationStore()
         self.response_formatter = response_formatter or ActionResponseFormatter()
+        self.reminder_store = reminder_store
 
         self.status = "idle"
         self.pending_command = None
         self._http_server = None
         self._server_thread = None
+        self._reminder_thread = None
+        self._reminder_stop = None
         try:
             self._start_status_server()
         except OSError:
@@ -177,6 +182,42 @@ class WakeRuntime:
             except Exception:
                 pass
             self._server_thread = None
+
+    def _poll_reminders_once(self, *, dry_run: bool) -> tuple:
+        """Fire any due reminders once, speaking each. Returns the fired reminders."""
+        if self.reminder_store is None:
+            return ()
+        return fire_due_reminders(
+            self.reminder_store,
+            lambda text: self.tts.speak(text, dry_run=dry_run),
+        )
+
+    def start_reminder_poller(self, *, dry_run: bool, interval: float = 20.0) -> None:
+        """Start a background thread that speaks reminders as they come due."""
+        if self.reminder_store is None:
+            self.reminder_store = ReminderStore()
+        self._reminder_stop = threading.Event()
+
+        def loop() -> None:
+            while not self._reminder_stop.wait(interval):
+                try:
+                    self._poll_reminders_once(dry_run=dry_run)
+                except Exception:
+                    pass
+
+        self._reminder_thread = threading.Thread(target=loop, daemon=True)
+        self._reminder_thread.start()
+
+    def stop_reminder_poller(self) -> None:
+        """Stop the reminder poller thread if it is running."""
+        if self._reminder_stop is not None:
+            self._reminder_stop.set()
+        if self._reminder_thread is not None:
+            try:
+                self._reminder_thread.join(timeout=0.5)
+            except Exception:
+                pass
+            self._reminder_thread = None
 
 
     def run(

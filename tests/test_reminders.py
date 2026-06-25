@@ -86,6 +86,32 @@ def test_cli_remind_parses_natural_phrase(monkeypatch, tmp_path, capsys):
     assert "llame a Ana" in capsys.readouterr().out
 
 
+def test_wake_runtime_poll_fires_due_reminders(tmp_path):
+    from eclipse_agent.notifications import NotificationStore
+    from eclipse_agent.wake_runtime import WakeRuntime
+
+    spoken: list[tuple[str, bool]] = []
+
+    class FakeTTS:
+        def speak(self, text, *, dry_run=True):
+            spoken.append((text, dry_run))
+
+    reminder_store = ReminderStore(tmp_path / "r.sqlite3")
+    reminder_store.add("tomar agua", datetime.now(UTC) - timedelta(seconds=5))
+
+    runtime = WakeRuntime(
+        tts=FakeTTS(),
+        store=NotificationStore(tmp_path / "n.sqlite3"),
+        reminder_store=reminder_store,
+    )
+
+    fired = runtime._poll_reminders_once(dry_run=True)
+
+    assert len(fired) == 1
+    assert spoken and "tomar agua" in spoken[0][0]
+    assert reminder_store.due() == ()
+
+
 def test_cli_reminders_check_fires_due(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     ReminderStore().add("recordatorio viejo", datetime.now(UTC) - timedelta(seconds=5))

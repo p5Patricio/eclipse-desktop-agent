@@ -932,6 +932,7 @@ def _cmd_wake_efficient(args: argparse.Namespace) -> int:
         ),
         store=_notification_store(args),
     )
+    runtime.start_reminder_poller(dry_run=not args.execute)
     result = runtime.run_efficient(
         iterations=args.iterations,
         command_seconds=args.command_seconds,
