@@ -213,6 +213,15 @@ def test_plans_lock_screen_as_medium_risk():
     assert action.risk_level is RiskLevel.MEDIUM
 
 
+def test_plans_general_question_as_answer():
+    plan = create_action_plan("Eclipse, qué es la fotosíntesis")
+
+    action = plan.actions[0]
+    assert action.kind is ActionKind.ANSWER_QUESTION
+    assert action.tool_name == "native.answer_question"
+    assert action.parameters["question"] == "qué es la fotosíntesis"
+
+
 def test_plans_clipboard_question_as_read_clipboard():
     plan = create_action_plan("Eclipse, qué tengo copiado")
 

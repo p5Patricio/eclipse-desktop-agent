@@ -29,6 +29,7 @@ from eclipse_agent.desktop_control import (
     DesktopControlResult,
     render_desktop_control_result,
 )
+from eclipse_agent.answer import answer_question_from_env, render_answer_result
 from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
 from eclipse_agent.system_control import SystemAction, render_system_control_result
 from eclipse_agent.pal.factory import PlatformFactory
@@ -376,6 +377,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     clipboard.add_argument("--action", required=True, choices=("read", "write"))
     clipboard.add_argument("--text", help="Text to copy when --action is write.")
+
+    ask = subparsers.add_parser(
+        "ask",
+        help="Answer a question with the configured LLM provider.",
+    )
+    ask.add_argument("--question", required=True, help="The question to answer.")
+    ask.add_argument(
+        "--provider",
+        default=None,
+        choices=sorted(PROVIDERS),
+        help="LLM provider preset. Defaults to ECLIPSE_LLM_PROVIDER or ollama.",
+    )
 
     notifications_ingest = subparsers.add_parser(
         "notifications-ingest",
@@ -1033,6 +1046,12 @@ def _cmd_system(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _cmd_ask(args: argparse.Namespace) -> int:
+    result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
+    print(render_answer_result(result))
+    return 0 if result.success else 1
+
+
 def _cmd_clipboard(args: argparse.Namespace) -> int:
     clip = WindowsClipboard()
     if args.action == "write":
@@ -1299,6 +1318,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "type-text": _cmd_type_text,
     "system": _cmd_system,
     "clipboard": _cmd_clipboard,
+    "ask": _cmd_ask,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

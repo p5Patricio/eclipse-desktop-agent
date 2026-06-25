@@ -192,6 +192,13 @@ class NativeMCPClient:
                 action_kinds=(ActionKind.READ_CLIPBOARD,),
                 risk_level=RiskLevel.LOW,
             ),
+            MCPToolDefinition(
+                name="answer_question",
+                server_name="native",
+                description="Answer a question with the configured LLM provider",
+                action_kinds=(ActionKind.ANSWER_QUESTION,),
+                risk_level=RiskLevel.LOW,
+            ),
         )
 
     def call_tool(self, tool: MCPToolDefinition, arguments: dict[str, Any]) -> NativeToolResult:
@@ -207,6 +214,8 @@ class NativeMCPClient:
             return self._system_control(arguments)
         if tool.name == "read_clipboard":
             return self._read_clipboard(arguments)
+        if tool.name == "answer_question":
+            return self._answer_question(arguments)
         return NativeToolResult(isError=True, _message=f"Unknown native tool: {tool.name}")
 
     def _open_url(self, arguments: dict[str, Any]) -> NativeToolResult:
@@ -333,6 +342,30 @@ class NativeMCPClient:
         return _native_failure(
             action_type="system_control",
             target=action.value,
+            reason=result.message,
+        )
+
+    def _answer_question(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.answer import answer_question_from_env
+
+        question = str(arguments.get("question", "") or arguments.get("target", "")).strip()
+        if not question:
+            return _native_failure(
+                action_type="answer_question",
+                target="answer",
+                reason="Tell me what you want to know.",
+            )
+        result = answer_question_from_env(question)
+        if result.success:
+            return _native_success(
+                action_type="answer_question",
+                target="answer",
+                message=result.answer,
+                extra_facts={"spoken": result.answer},
+            )
+        return _native_failure(
+            action_type="answer_question",
+            target="answer",
             reason=result.message,
         )
 

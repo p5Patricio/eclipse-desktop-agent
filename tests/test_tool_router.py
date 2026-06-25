@@ -635,6 +635,34 @@ def test_native_read_clipboard_returns_text(monkeypatch):
     assert result.structured_content["user_facts"]["spoken"] == "copied text"
 
 
+def test_native_answer_question_uses_llm(monkeypatch):
+    import eclipse_agent.answer as answer_mod
+    from eclipse_agent.answer import AnswerResult
+
+    monkeypatch.setattr(
+        answer_mod,
+        "answer_question_from_env",
+        lambda question, **kwargs: AnswerResult(True, question, "Es una planta.", "Es una planta."),
+    )
+
+    action = PlannedAction(
+        id="ans-1",
+        kind=ActionKind.ANSWER_QUESTION,
+        description="Answer a question.",
+        risk_level=RiskLevel.LOW,
+        target="answer",
+        parameters={"question": "qué es la albahaca"},
+        tool_name="native.answer_question",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action, ToolExecutionContext(dry_run=False)
+    )
+
+    assert result.success is True
+    assert result.structured_content["user_facts"]["spoken"] == "Es una planta."
+
+
 def test_load_mcp_server_configs_reads_stdio_servers(tmp_path):
     path = tmp_path / "mcp-servers.json"
     path.write_text(

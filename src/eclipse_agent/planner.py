@@ -104,6 +104,7 @@ class ActionKind(StrEnum):
     NATIVE_INPUT = "native_input"
     SYSTEM_CONTROL = "system_control"
     READ_CLIPBOARD = "read_clipboard"
+    ANSWER_QUESTION = "answer_question"
     UNKNOWN = "unknown"
 
 
@@ -724,6 +725,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if screenshot_action:
         return (screenshot_action,)
 
+    answer_action = _maybe_answer_question_action(clause, lowered, start_index)
+    if answer_action:
+        return (answer_action,)
+
     return (
         PlannedAction(
             id=f"action-{start_index}",
@@ -930,6 +935,31 @@ def _maybe_system_control_action(clause: str, lowered: str, index: int) -> Plann
         target=action,
         parameters={"system_action": action},
         tool_name="native.system_control",
+    )
+
+
+_QUESTION_TOKENS = (
+    "qué", "cuál", "cuánt", "cómo", "por qué", "porqué", "quién", "dónde", "cuándo",
+    "explica", "explicá", "definí", "define", "calcul", "traducí", "traduce",
+    "what", "how", "why", "who", "where", "when", "explain", "translate",
+)
+
+
+def _maybe_answer_question_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    is_question = "?" in clause or any(token in lowered for token in _QUESTION_TOKENS)
+    if not is_question:
+        return None
+    question = re.sub(r"^\s*eclipse,?\s*", "", clause, flags=re.IGNORECASE).strip()
+    if not question:
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.ANSWER_QUESTION,
+        description="Answer the user's question with the LLM provider.",
+        risk_level=RiskLevel.LOW,
+        target="answer",
+        parameters={"question": question},
+        tool_name="native.answer_question",
     )
 
 
