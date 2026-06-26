@@ -135,6 +135,25 @@ eclipse-agent list-windows
 eclipse-agent screenshot --output captura.png --execute
 eclipse-agent type-text --text "hola" --confirmed
 
+:: Control del sistema (volumen, medios, bloqueo, batería)
+eclipse-agent system --action volume_up --execute
+eclipse-agent system --action media_play_pause --execute
+eclipse-agent system --action battery
+eclipse-agent system --action lock --execute --confirmed
+
+:: Portapapeles
+eclipse-agent clipboard --action read
+eclipse-agent clipboard --action write --text "texto a copiar"
+
+:: Responder preguntas (usa el proveedor LLM configurado)
+eclipse-agent ask --question "¿Cuál es la capital de Japón?"
+
+:: Recordatorios y timers
+eclipse-agent remind --text "en 10 minutos que saque la pizza"
+eclipse-agent remind --text "llamar a Ana" --seconds 600
+eclipse-agent reminders-list
+eclipse-agent reminders-check --speak
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -168,6 +187,15 @@ daemon always-on
   respuesta, persistidas en SQLite.
 - **Control de escritorio**: lanzar apps, listar ventanas, capturas de pantalla y tipeo
   nativo, a través de una capa de abstracción de plataforma (PAL) de Windows.
+- **Control del sistema**: volumen (subir/bajar/silenciar), medios (play-pausa, siguiente,
+  anterior), bloquear la pantalla y estado de batería — vía teclas virtuales de Windows,
+  sin dependencias extra.
+- **Portapapeles**: leer y escribir el portapapeles de Windows (y hablarte lo que tenés
+  copiado).
+- **Responder preguntas**: además de abrir cosas, Eclipse responde de verdad usando el
+  proveedor LLM configurado (local o DeepSeek), con respuestas concisas pensadas para hablar.
+- **Recordatorios y timers**: agendá recordatorios por voz ("recordame en 10 minutos que…"),
+  persistidos en SQLite y disparados automáticamente por el daemon de wake word.
 - **Automatización web** opcional vía `agent-browser`.
 - **Visión** de pantalla bajo demanda con un modelo multimodal local.
 - **Planificador híbrido**: reglas deterministas rápidas + capa LLM (local o DeepSeek) para
