@@ -780,7 +780,7 @@ def _maybe_media_action(clause: str, lowered: str, index: int) -> PlannedAction 
         risk_level=RiskLevel.LOW,
         target="YouTube Music",
         parameters={"query": query, "app_name": "YouTube Music"},
-        tool_name="desktop.open_app",
+        tool_name="native.play_media",
     )
 
 

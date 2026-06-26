@@ -31,6 +31,10 @@ from eclipse_agent.desktop_control import (
 )
 from eclipse_agent.answer import answer_question_from_env, render_answer_result
 from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
+from eclipse_agent.media_playback import (
+    MediaPlaybackWorkflow,
+    render_media_playback_result,
+)
 from eclipse_agent.memory import (
     MemoryIntent,
     MemoryStore,
@@ -476,6 +480,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--speak",
         action="store_true",
         help="Actually speak due routines instead of dry-running.",
+    )
+
+    play_media = subparsers.add_parser(
+        "play-media",
+        help="Search and play media in a web app like YouTube Music.",
+    )
+    play_media.add_argument(
+        "--app",
+        default="YouTube Music",
+        help="Media web app. Defaults to YouTube Music.",
+    )
+    play_media.add_argument("--query", required=True, help="What to play.")
+    play_media.add_argument(
+        "--confirmed",
+        action="store_true",
+        help="Required to actually type the search and click play.",
+    )
+    play_media.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually run it through agent-browser instead of dry-running.",
     )
 
     reminders_check = subparsers.add_parser(
@@ -1280,6 +1305,17 @@ def _cmd_routines_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_play_media(args: argparse.Namespace) -> int:
+    result = MediaPlaybackWorkflow().play(
+        args.app,
+        args.query,
+        confirmed=args.confirmed,
+        dry_run=not args.execute,
+    )
+    print(render_media_playback_result(result))
+    return 0 if result.success else 1
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
     print(render_answer_result(result))
@@ -1564,6 +1600,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "routines-list": _cmd_routines_list,
     "routine-remove": _cmd_routine_remove,
     "routines-check": _cmd_routines_check,
+    "play-media": _cmd_play_media,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

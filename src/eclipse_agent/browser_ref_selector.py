@@ -20,6 +20,7 @@ class BrowserRefPurpose(StrEnum):
     MESSAGE_INPUT = "message_input"
     SEND_BUTTON = "send_button"
     SEARCH_INPUT = "search_input"
+    PLAY_CONTROL = "play_control"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -69,6 +70,18 @@ MESSAGE_INPUT_KEYWORDS = (
 )
 SEND_BUTTON_KEYWORDS = ("send", "enviar", "mandar")
 SEARCH_INPUT_KEYWORDS = ("search", "buscar", "busca")
+PLAY_CONTROL_KEYWORDS = (
+    "play",
+    "reproducir",
+    "reproduce",
+    "listen",
+    "escuchar",
+    "song",
+    "canción",
+    "cancion",
+    "result",
+    "resultado",
+)
 
 TEXT_ENTRY_ROLES = {
     "textbox",
@@ -155,6 +168,12 @@ def _score_element(
     elif purpose is BrowserRefPurpose.SEARCH_INPUT:
         score += _score_text_entry_role(role, reasons)
         score += _score_keywords(name, SEARCH_INPUT_KEYWORDS, reasons)
+    elif purpose is BrowserRefPurpose.PLAY_CONTROL:
+        if role in BUTTON_ROLES:
+            score += 45
+            reasons.append(f"button-like role {role}")
+        score += _score_keywords(name, PLAY_CONTROL_KEYWORDS, reasons)
+        score -= _negative_keyword_penalty(name, SEARCH_INPUT_KEYWORDS, "search keyword", reasons)
     else:
         if role in BUTTON_ROLES:
             score += 45
@@ -215,7 +234,7 @@ def _negative_keyword_penalty(
 
 def _role_priority(role: str, purpose: BrowserRefPurpose) -> int:
     normalized = role.casefold().strip()
-    if purpose is BrowserRefPurpose.SEND_BUTTON:
+    if purpose in {BrowserRefPurpose.SEND_BUTTON, BrowserRefPurpose.PLAY_CONTROL}:
         return 2 if normalized == "button" else 1 if normalized in BUTTON_ROLES else 0
     if normalized in {"textbox", "textarea"}:
         return 3

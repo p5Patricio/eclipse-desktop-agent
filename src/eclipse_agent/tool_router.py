@@ -207,6 +207,13 @@ class NativeMCPClient:
                 risk_level=RiskLevel.LOW,
             ),
             MCPToolDefinition(
+                name="play_media",
+                server_name="native",
+                description="Search and play media in a web app like YouTube Music",
+                action_kinds=(ActionKind.PLAY_MEDIA,),
+                risk_level=RiskLevel.MEDIUM,
+            ),
+            MCPToolDefinition(
                 name="add_routine",
                 server_name="native",
                 description="Schedule a recurring proactive routine",
@@ -246,6 +253,8 @@ class NativeMCPClient:
             return self._answer_question(arguments)
         if tool.name == "set_reminder":
             return self._set_reminder(arguments)
+        if tool.name == "play_media":
+            return self._play_media(arguments)
         if tool.name == "add_routine":
             return self._add_routine(arguments)
         if tool.name == "remember_fact":
@@ -444,6 +453,36 @@ class NativeMCPClient:
             target="clipboard",
             message=spoken,
             extra_facts={"spoken": spoken},
+        )
+
+    def _play_media(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.media_playback import MediaPlaybackWorkflow
+
+        query = str(arguments.get("query", "") or "").strip()
+        app_name = str(arguments.get("app_name", "") or "YouTube Music").strip()
+        if not query:
+            return _native_failure(
+                action_type="play_media",
+                target=app_name,
+                reason="Tell me what you want to play.",
+            )
+        result = MediaPlaybackWorkflow().play(
+            app_name, query, confirmed=True, dry_run=False
+        )
+        if result.success:
+            return _native_success(
+                action_type="play_media",
+                target=app_name,
+                message=result.message,
+                extra_facts={"spoken": result.message},
+            )
+        reason = result.message
+        if "binary not found" in reason.casefold():
+            reason = "Necesito agent-browser instalado para reproducir música."
+        return _native_failure(
+            action_type="play_media",
+            target=app_name,
+            reason=reason,
         )
 
     def _add_routine(self, arguments: dict[str, Any]) -> NativeToolResult:

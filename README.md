@@ -168,6 +168,10 @@ eclipse-agent routines-list
 eclipse-agent routine-remove --name agua
 eclipse-agent routines-check --speak
 
+:: Reproducir en apps web (requiere agent-browser y sesión iniciada)
+eclipse-agent play-media --query "El lado oscuro"
+eclipse-agent play-media --app "YouTube Music" --query "El lado oscuro" --execute --confirmed
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -216,6 +220,10 @@ daemon always-on
 - **Rutinas proactivas**: agendá acciones recurrentes ("cada mañana a las 8 decime el
   resumen", "cada 10 minutos recordame tomar agua"), diarias o por intervalo, que el daemon
   dispara solo. La acción puede hablar un mensaje fijo o responderlo con el LLM.
+- **Operar dentro de apps web**: buscá y reproducí en apps como YouTube Music
+  ("reproduce X en YouTube Music"). Eclipse abre la app, lee la página por accesibilidad,
+  elige el campo de búsqueda y el control de reproducción, y actúa con confirmación. Requiere
+  `agent-browser` instalado y una sesión iniciada; sin eso, avisa con gracia.
 - **Automatización web** opcional vía `agent-browser`.
 - **Visión** de pantalla bajo demanda con un modelo multimodal local.
 - **Planificador híbrido**: reglas deterministas rápidas + capa LLM (local o DeepSeek) para
