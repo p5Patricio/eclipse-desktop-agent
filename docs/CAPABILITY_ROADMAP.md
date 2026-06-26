@@ -2,39 +2,59 @@
 
 Resumen de qué ya funciona y qué falta para usar Eclipse como asistente diario en Windows.
 
-## Estado
+## Capacidades del asistente
+
+Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por voz y CLI:
+
+| Capacidad | Estado | Comandos |
+|---|---|---|
+| Control del sistema (volumen, medios, bloqueo, batería) | ✅ | `system` |
+| Portapapeles (leer/escribir, hablar lo copiado) | ✅ | `clipboard` |
+| Responder preguntas (resumen vía LLM) | ✅ | `ask` |
+| Recordatorios y timers (disparados por el daemon) | ✅ | `remind`, `reminders-list`, `reminders-check` |
+| Memoria persistente de hechos/preferencias | ✅ | `remember`, `memory-list`, `memory-recall`, `memory-forget` |
+| Rutinas proactivas (diarias o por intervalo) | ✅ | `routine-add`, `routines-list`, `routine-remove`, `routines-check` |
+| Reproducir en apps web (YouTube Music) | ✅ orquestación; requiere `agent-browser` + sesión | `play-media` |
+
+## Estado de la plataforma
 
 | Área | Estado | Siguiente paso |
 |---|---|---|
 | Plataforma | Windows-only (PAL completo) | — |
-| Activación always-on | Wake word local implementado | Daemon de fondo + atajo push-to-talk |
-| Voz STT/TTS | faster-whisper + SAPI funcionando | Modelo de wake word `Eclipse` propio |
+| Activación always-on | Wake word local + daemon con pollers de recordatorios y rutinas | Atajo push-to-talk global |
+| Voz STT/TTS | faster-whisper + SAPI funcionando | Modelo de wake word `Eclipse` propio; voz más natural |
 | Planner multi-acción | Híbrido determinista + LLM | Mejores heurísticas para casos ambiguos |
 | Proveedores LLM | ollama / deepseek / openai configurables | Verificar round-trip real de DeepSeek |
 | ToolRouter | Tools nativas + MCP, con safety gates | Scheduler con paralelismo/timeout/cancelación |
 | Apps de escritorio | Launcher del Menú Inicio | Enfoque/control de ventanas (UI Automation) |
-| Browser automation | `agent-browser` (opcional) | Selección automática de refs semánticas |
+| Browser automation | Adapter + selección de refs + orquestación search-and-play | Verificación real con `agent-browser` y sesión iniciada |
 | Notificaciones | Core SQLite + listener winrt + intents + reply | Pruebas reales con sitios autenticados |
 | Visión de pantalla | Captura + análisis local + redacción | Mejorar detección de zonas sensibles |
 | Agentes de codificación | Prompt contract | Launcher con confirmación y kill switch |
-| Memoria local | SQLite (notificaciones, telemetría) | Permission store y audit log |
+| Memoria local | SQLite: notificaciones, telemetría, recordatorios, hechos, rutinas | Permission store y audit log |
 | Seguridad | Draft-first + confirmaciones + redactor | Kill switch y panel de permisos |
-| Entorno | venv reproducible (`setup.bat`) | — |
+| Entorno | venv reproducible (`setup.bat`) + CI en Windows | — |
 
-## Bloques prioritarios
+## Pendiente
 
-### Web adapters por sitio
-- Parsear snapshots de `agent-browser` en `BrowserElement` (hecho) y rankear elementos
-  interactivos (textbox/button/link).
-- YouTube Music: abrir, buscar, elegir resultado, reproducir, verificar.
-- Instagram/Messenger: abrir, preparar borrador, **no enviar** hasta confirmación.
+### Profundidad (depende de credenciales o modelos externos)
+
+- **RAG sobre notas/PDFs**: Q&A sobre documentos locales. Requiere un backend de embeddings
+  (Ollama `nomic-embed-text` u OpenAI) y reintroducir un store vectorial.
+- **Calendario / email**: leer agenda, resumir bandeja, redactar respuestas. Requiere OAuth
+  de Google o un MCP server con acceso a las cuentas.
+- **Verificación real de reproducción web**: instalar `agent-browser` y abrir sesión para
+  probar el flujo de búsqueda y reproducción end-to-end.
 
 ### Control nativo
+
 - UI Automation de Windows para leer/activar elementos accesibles.
 - Verificación de resultado tras cada acción.
 
-### Endurecimiento (Fase 5)
+### Endurecimiento
+
 - Panel de permisos, audit log, kill switch, modo privado.
+- Atajo global de push-to-talk, voz neural y app de bandeja (tray).
 
 ## Regla de seguridad
 

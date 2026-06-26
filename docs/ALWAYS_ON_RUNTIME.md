@@ -31,6 +31,10 @@ wake-loop
 palabra de activación, para reducir CPU en reposo. `scripts\start_eclipse.bat` lanza este
 modo con `hey_jarvis` por defecto.
 
+Además del wake word, el daemon corre dos pollers livianos en segundo plano que hablan
+proactivamente cuando algo vence: **recordatorios** (`start_reminder_poller`) y **rutinas**
+(`start_routine_poller`). Ambos respetan el modo dry-run salvo que se ejecute con `--execute`.
+
 ## Impacto de recursos
 
 | Modo | RAM en espera | CPU en espera | Comentario |

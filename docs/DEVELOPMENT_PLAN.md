@@ -54,8 +54,21 @@ micrófono; mostrar transcripción antes de acciones críticas.
 
 ## Fase 5 — Copiloto diario (en progreso)
 
-Capacidades candidatas: responder mensajes con confirmación, notas de pantalla,
-recordatorios, abrir apps/workflows, buscar y resumir.
+Capacidades ya implementadas (voz + CLI):
+
+- Control del sistema: volumen, medios (play/pausa/siguiente), bloqueo, batería.
+- Portapapeles: leer/escribir y hablar lo copiado.
+- Responder preguntas con el proveedor LLM (buscar y resumir).
+- Recordatorios y timers, persistidos y disparados por el daemon.
+- Memoria persistente de hechos y preferencias entre sesiones.
+- Rutinas proactivas (diarias o por intervalo), disparadas por el daemon.
+- Reproducir en apps web (YouTube Music) vía el adapter de navegador.
+
+Pendiente (depende de setup externo):
+
+- RAG sobre notas/PDFs (requiere backend de embeddings).
+- Calendario/email (requiere OAuth de Google o un MCP server).
+- Verificación real de reproducción web (requiere `agent-browser` + sesión iniciada).
 
 Pendiente de endurecimiento:
 
@@ -71,5 +84,8 @@ Pendiente de endurecimiento:
 - Atajo global de push-to-talk.
 - Modelo de wake word `Eclipse` propio que pase evaluación.
 - Verificación real del round-trip de DeepSeek con una API key.
-- Adapters web por sitio (YouTube Music, Instagram/Messenger) con selección de refs.
+- RAG sobre notas/PDFs con un backend de embeddings.
+- Calendario/email vía OAuth o MCP server.
+- Reply-draft web para Instagram/Messenger (búsqueda y reproducción en YouTube Music ya
+  implementadas; falta verificación real con `agent-browser`).
 - Test harness ampliado y threat model.

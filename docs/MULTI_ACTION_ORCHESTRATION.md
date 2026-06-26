@@ -33,13 +33,19 @@ Natural-language instruction
   -> spoken/text response
 ```
 
-## Tipos de acción iniciales
+## Tipos de acción
 
-| Acción | Ejemplo | Riesgo inicial | Tool futura |
+| Acción | Ejemplo | Riesgo | Tool |
 |---|---|---:|---|
-| `play_media` | Reproduce una canción en YouTube Music | Bajo | Desktop app launcher + accessibility/browser adapter |
+| `play_media` | Reproduce una canción en YouTube Music | Bajo | `native.play_media` (search-and-play vía browser adapter) |
 | `open_web_app` | Abre YouTube/Instagram/Messenger | Bajo | Browser adapter / agent-browser |
 | `browser_search` | Busca especificaciones en una página | Medio | agent-browser snapshots + refs semánticas |
+| `system_control` | Sube el volumen, pausa, bloquea, batería | Bajo/Medio | `native.system_control` |
+| `read_clipboard` | "¿Qué tengo copiado?" | Bajo | `native.read_clipboard` |
+| `answer_question` | "¿Qué es la fotosíntesis?" | Bajo | `native.answer_question` |
+| `set_reminder` | "Recordame en 10 minutos…" | Bajo | `native.set_reminder` |
+| `add_routine` | "Cada mañana decime el resumen" | Bajo | `native.add_routine` |
+| `remember_fact` / `recall_memory` | "Mi nombre es Patricio" / "¿Cómo me llamo?" | Bajo | `native.remember_fact` / `native.recall_memory` |
 | `open_coding_agent` | Abre Claude Code/Gemini/Codex | Alto | Coding agent bridge |
 | `unknown` | Petición ambigua | Medio | Pregunta aclaratoria |
 

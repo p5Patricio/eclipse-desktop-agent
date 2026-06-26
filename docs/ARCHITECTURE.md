@@ -52,9 +52,18 @@ Verification + Response
 | `planner` | Divide instrucciones compuestas en acciones; provider-agnostic |
 | `tool_router` | Convierte `PlannedAction` en tools concretas con gates de seguridad |
 | `browser_automation` | Abre/busca/snapshot en navegador vía `agent-browser` |
+| `browser_ref_selector` | Elige refs semánticos del snapshot de accesibilidad por propósito |
+| `media_playback` | Orquesta abrir → buscar → reproducir en apps web (YouTube Music) |
 | `coding_agents` | Prepara prompts y abre Claude Code / Gemini / Codex |
 | `notifications` | Captura, reglas de foco, resúmenes y borradores (SQLite) |
 | `desktop_control` | Tipos de resultado neutrales para control de escritorio |
+| `system_control` | Volumen, medios, bloqueo de pantalla y batería (teclas virtuales) |
+| `clipboard` | Lee/escribe el portapapeles de Windows |
+| `answer` | Responde preguntas con el proveedor LLM (resumen hablado) |
+| `reminders` | Recordatorios y timers (SQLite), disparados por el daemon |
+| `memory` | Memoria persistente de hechos y preferencias (SQLite) |
+| `routines` | Rutinas proactivas recurrentes (SQLite), disparadas por el daemon |
+| `response_formatter` | Construye la respuesta hablada a partir del resultado de la acción |
 | `pal/` | **Platform Abstraction Layer** de Windows: ventanas, input, captura, lanzador, notificaciones, voz, daemon |
 | `safety/` | Política de riesgo y redacción de capturas |
 | `runtime_diagnostics` | Estado de dependencias locales (CLI `diagnostics`) |
@@ -64,7 +73,8 @@ Verification + Response
 
 Todo lo nativo de Windows pasa por interfaces en `pal/base.py`
 (`WindowManager`, `InputSynthesizer`, `ScreenCapture`, `AppLauncher`,
-`NotificationDaemon`, `TTSProvider`, `AudioRecorder`, `DaemonManager`).
+`NotificationDaemon`, `TTSProvider`, `AudioRecorder`, `DaemonManager`,
+`SystemController`).
 `PlatformFactory` construye las implementaciones de `pal/windows/`. Esto mantiene el resto
 del código desacoplado de detalles de plataforma y testeable por inyección de dependencias.
 
