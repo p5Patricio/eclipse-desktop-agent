@@ -207,6 +207,13 @@ class NativeMCPClient:
                 risk_level=RiskLevel.LOW,
             ),
             MCPToolDefinition(
+                name="summarize_inbox",
+                server_name="native",
+                description="Read and summarize the user's email inbox (read-only)",
+                action_kinds=(ActionKind.SUMMARIZE_INBOX,),
+                risk_level=RiskLevel.LOW,
+            ),
+            MCPToolDefinition(
                 name="set_reminder",
                 server_name="native",
                 description="Set a reminder or timer",
@@ -260,6 +267,8 @@ class NativeMCPClient:
             return self._answer_question(arguments)
         if tool.name == "query_documents":
             return self._query_documents(arguments)
+        if tool.name == "summarize_inbox":
+            return self._summarize_inbox(arguments)
         if tool.name == "set_reminder":
             return self._set_reminder(arguments)
         if tool.name == "play_media":
@@ -443,6 +452,23 @@ class NativeMCPClient:
         return _native_failure(
             action_type="answer_question",
             target="answer",
+            reason=result.message,
+        )
+
+    def _summarize_inbox(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.email_inbox import summarize_inbox
+
+        result = summarize_inbox()
+        if result.success:
+            return _native_success(
+                action_type="summarize_inbox",
+                target="inbox",
+                message=result.summary,
+                extra_facts={"spoken": result.summary},
+            )
+        return _native_failure(
+            action_type="summarize_inbox",
+            target="inbox",
             reason=result.message,
         )
 

@@ -16,6 +16,7 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 | Rutinas proactivas (diarias o por intervalo) | ✅ | `routine-add`, `routines-list`, `routine-remove`, `routines-check` |
 | Reproducir en apps web (YouTube Music) | ✅ orquestación; requiere `agent-browser` + sesión | `play-media` |
 | Q&A sobre notas/PDFs (RAG) | ✅ pipeline; requiere modelo de embeddings (Ollama) | `docs-add`, `docs-list`, `docs-ask`, `docs-clear` |
+| Email: leer/resumir bandeja + borradores (IMAP, read-only) | ✅ pipeline; requiere app password | `email-list`, `email-summary`, `email-draft` |
 
 ## Estado de la plataforma
 
@@ -41,8 +42,8 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 
 ### Profundidad (depende de credenciales o modelos externos)
 
-- **Calendario / email**: leer agenda, resumir bandeja, redactar respuestas. Requiere OAuth
-  de Google o un MCP server con acceso a las cuentas.
+- **Calendario (CalDAV)**: leer la agenda y próximos eventos. Requiere una app password.
+  (El email por IMAP ya está implementado; falta el slice de calendario.)
 - **Verificación real de reproducción web**: instalar `agent-browser` y abrir sesión para
   probar el flujo de búsqueda y reproducción end-to-end.
 

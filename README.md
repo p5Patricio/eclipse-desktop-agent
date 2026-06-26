@@ -95,6 +95,11 @@ OPENAI_API_KEY=
 # ECLIPSE_EMBED_MODEL=nomic-embed-text
 # ECLIPSE_EMBED_BASE_URL=
 
+# Email por IMAP (solo lectura). Gmail: activá IMAP, 2FA y creá una app password.
+# ECLIPSE_IMAP_HOST=imap.gmail.com
+# ECLIPSE_IMAP_USER=tu-correo@gmail.com
+# ECLIPSE_IMAP_PASSWORD=
+
 # Voz y wake word
 # ECLIPSE_WHISPER_MODEL=small
 # ECLIPSE_WAKE_THRESHOLD=0.5
@@ -185,6 +190,11 @@ eclipse-agent docs-list
 eclipse-agent docs-ask --query "¿qué dije sobre el deploy?"
 eclipse-agent docs-clear
 
+:: Email por IMAP (solo lectura; requiere app password — ver Configuración)
+eclipse-agent email-list
+eclipse-agent email-summary
+eclipse-agent email-draft --uid 12345 --instruction "agradecé y confirmá"
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -234,6 +244,9 @@ daemon always-on
   ("según mis notas, ¿qué dije del deploy?"). Embeddings provider-agnostic (Ollama
   `nomic-embed-text` por defecto) + búsqueda por similitud coseno en SQLite, sin base
   vectorial externa.
+- **Email (lectura)**: leé y resumí tu bandeja por voz o CLI ("resumime mi bandeja") y
+  redactá borradores de respuesta — **nunca envía**. Vía IMAP (stdlib) con una app password;
+  estrictamente read-only.
 - **Rutinas proactivas**: agendá acciones recurrentes ("cada mañana a las 8 decime el
   resumen", "cada 10 minutos recordame tomar agua"), diarias o por intervalo, que el daemon
   dispara solo. La acción puede hablar un mensaje fijo o responderlo con el LLM.

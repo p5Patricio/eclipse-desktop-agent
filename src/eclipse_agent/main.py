@@ -40,6 +40,14 @@ from eclipse_agent.documents import (
     render_document_sources,
     render_ingest_result,
 )
+from eclipse_agent.email_inbox import (
+    ImapMailbox,
+    draft_reply,
+    render_email_messages,
+    render_inbox_summary,
+    render_reply_draft,
+    summarize_inbox,
+)
 from eclipse_agent.media_playback import (
     MediaPlaybackWorkflow,
     render_media_playback_result,
@@ -505,6 +513,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Answer a question grounded in your ingested documents.",
     )
     docs_ask.add_argument("--query", required=True, help="The question to answer.")
+
+    email_list = subparsers.add_parser(
+        "email-list",
+        help="List recent inbox messages over IMAP (read-only).",
+    )
+    email_list.add_argument("--limit", type=int, default=5, help="How many messages.")
+    email_list.add_argument(
+        "--all", action="store_true", help="Include read messages, not just unread."
+    )
+
+    email_summary = subparsers.add_parser(
+        "email-summary",
+        help="Read and summarize your inbox (read-only).",
+    )
+    email_summary.add_argument("--limit", type=int, default=5, help="How many messages.")
+    email_summary.add_argument("--all", action="store_true", help="Include read messages.")
+
+    email_draft = subparsers.add_parser(
+        "email-draft",
+        help="Draft a reply to a message. Never sends.",
+    )
+    email_draft.add_argument("--uid", required=True, help="Message UID from email-list.")
+    email_draft.add_argument("--instruction", default="", help="Guidance for the reply.")
 
     play_media = subparsers.add_parser(
         "play-media",
@@ -1363,6 +1394,44 @@ def _cmd_docs_ask(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _cmd_email_list(args: argparse.Namespace) -> int:
+    box = ImapMailbox()
+    if not box.is_configured():
+        print("Configure ECLIPSE_IMAP_USER and ECLIPSE_IMAP_PASSWORD first.")
+        return 1
+    try:
+        messages = box.fetch_recent(limit=args.limit, unseen_only=not args.all)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Could not read inbox: {exc}")
+        return 1
+    print(render_email_messages(messages))
+    return 0
+
+
+def _cmd_email_summary(args: argparse.Namespace) -> int:
+    result = summarize_inbox(limit=args.limit, unseen_only=not args.all)
+    print(render_inbox_summary(result))
+    return 0 if result.success else 1
+
+
+def _cmd_email_draft(args: argparse.Namespace) -> int:
+    box = ImapMailbox()
+    if not box.is_configured():
+        print("Configure ECLIPSE_IMAP_USER and ECLIPSE_IMAP_PASSWORD first.")
+        return 1
+    try:
+        messages = box.fetch_recent(limit=20, unseen_only=False)
+    except Exception as exc:  # noqa: BLE001
+        print(f"Could not read inbox: {exc}")
+        return 1
+    target = next((message for message in messages if message.uid == args.uid), None)
+    if target is None:
+        print(f"No message with uid {args.uid} in the recent inbox.")
+        return 1
+    print(render_reply_draft(draft_reply(target, args.instruction)))
+    return 0
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
     print(render_answer_result(result))
@@ -1652,6 +1721,9 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "docs-list": _cmd_docs_list,
     "docs-clear": _cmd_docs_clear,
     "docs-ask": _cmd_docs_ask,
+    "email-list": _cmd_email_list,
+    "email-summary": _cmd_email_summary,
+    "email-draft": _cmd_email_draft,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

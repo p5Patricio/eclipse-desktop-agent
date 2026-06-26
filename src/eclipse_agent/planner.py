@@ -109,6 +109,7 @@ class ActionKind(StrEnum):
     READ_CLIPBOARD = "read_clipboard"
     ANSWER_QUESTION = "answer_question"
     QUERY_DOCUMENTS = "query_documents"
+    SUMMARIZE_INBOX = "summarize_inbox"
     SET_REMINDER = "set_reminder"
     ADD_ROUTINE = "add_routine"
     REMEMBER_FACT = "remember_fact"
@@ -776,6 +777,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if screenshot_action:
         return (screenshot_action,)
 
+    inbox_action = _maybe_summarize_inbox_action(clause, lowered, start_index)
+    if inbox_action:
+        return (inbox_action,)
+
     documents_action = _maybe_query_documents_action(clause, lowered, start_index)
     if documents_action:
         return (documents_action,)
@@ -1058,6 +1063,26 @@ def _maybe_memory_action(clause: str, lowered: str, index: int) -> PlannedAction
         target=request.key or "memory",
         parameters={"memory_key": request.key},
         tool_name="native.recall_memory",
+    )
+
+
+_INBOX_TOKENS = (
+    "mi bandeja", "mis correos", "mis mails", "mis emails", "mi correo",
+    "bandeja de entrada", "my inbox", "my emails", "my mail", "my email",
+)
+
+
+def _maybe_summarize_inbox_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(token in lowered for token in _INBOX_TOKENS):
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.SUMMARIZE_INBOX,
+        description="Read and summarize the user's inbox.",
+        risk_level=RiskLevel.LOW,
+        target="inbox",
+        parameters={},
+        tool_name="native.summarize_inbox",
     )
 
 

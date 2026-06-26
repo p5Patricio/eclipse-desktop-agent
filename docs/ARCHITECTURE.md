@@ -64,6 +64,7 @@ Verification + Response
 | `memory` | Memoria persistente de hechos y preferencias (SQLite) |
 | `routines` | Rutinas proactivas recurrentes (SQLite), disparadas por el daemon |
 | `documents` | Q&A (RAG) sobre notas/PDFs: embeddings + similitud coseno en SQLite |
+| `email_inbox` | Lectura/resumen de bandeja y borradores por IMAP (read-only, nunca envía) |
 | `response_formatter` | Construye la respuesta hablada a partir del resultado de la acción |
 | `pal/` | **Platform Abstraction Layer** de Windows: ventanas, input, captura, lanzador, notificaciones, voz, daemon |
 | `safety/` | Política de riesgo y redacción de capturas |
