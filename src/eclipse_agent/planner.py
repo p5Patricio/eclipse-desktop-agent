@@ -614,13 +614,44 @@ def build_vision_messages(*, prompt: str, image_path: str | Path) -> list[dict[s
     ]
 
 
+VISION_MAX_IMAGE_DIM = 1280
+
+
 def encode_image_as_data_url(image_path: str | Path) -> str:
-    """Read an image and encode it as an OpenAI-compatible data URL."""
+    """Read an image and encode it as an OpenAI-compatible data URL.
+
+    Large images (e.g. full-resolution multi-monitor screenshots) are downscaled
+    first so the request fits the vision model's context window.
+    """
 
     path = Path(image_path).expanduser()
-    mime_type = _image_mime_type(path)
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    data, mime_type = _image_bytes_for_vision(path)
+    encoded = base64.b64encode(data).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def _image_bytes_for_vision(path: Path) -> tuple[bytes, str]:
+    raw = path.read_bytes()
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(raw)) as image:
+            largest = max(image.size)
+            if largest <= VISION_MAX_IMAGE_DIM:
+                return raw, _image_mime_type(path)
+            scale = VISION_MAX_IMAGE_DIM / largest
+            new_size = (
+                max(1, round(image.width * scale)),
+                max(1, round(image.height * scale)),
+            )
+            resized = image.convert("RGB").resize(new_size)
+            buffer = io.BytesIO()
+            resized.save(buffer, format="PNG")
+            return buffer.getvalue(), "image/png"
+    except Exception:  # noqa: BLE001
+        return raw, _image_mime_type(path)
 
 
 def build_llm_planner_messages(

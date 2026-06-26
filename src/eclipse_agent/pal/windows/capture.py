@@ -9,6 +9,7 @@ class WindowsScreenCapture(ScreenCapture):
         *,
         output_path: str | Path | None = None,
         geometry: str | None = None,
+        all_screens: bool = True,
         dry_run: bool = True,
     ) -> Any:
         # Default output path
@@ -40,7 +41,12 @@ class WindowsScreenCapture(ScreenCapture):
                 except ValueError:
                     pass
             
-            img = ImageGrab.grab(bbox=bbox)
+            if bbox is not None:
+                img = ImageGrab.grab(bbox=bbox)
+            else:
+                # all_screens spans every monitor (the full virtual desktop);
+                # without it ImageGrab only captures the primary monitor.
+                img = ImageGrab.grab(all_screens=all_screens)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             img.save(output_path)
             return DesktopControlResult(

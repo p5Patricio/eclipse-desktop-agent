@@ -38,9 +38,13 @@ class ScreenCapture(ABC):
         *,
         output_path: str | Path | None = None,
         geometry: str | None = None,
+        all_screens: bool = True,
         dry_run: bool = True,
     ) -> Any:
-        """Capture the screen or a region of it."""
+        """Capture the screen or a region of it.
+
+        With no ``geometry``, captures every monitor when ``all_screens`` is true.
+        """
         pass
 
     @abstractmethod

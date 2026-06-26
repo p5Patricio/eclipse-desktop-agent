@@ -112,13 +112,19 @@ def test_windows_screen_capture():
     assert res_dry.success is True
     assert res_dry.dry_run is True
 
-    # Real run with mocked PIL
+    # Real run with mocked PIL: no geometry captures all monitors
     mock_grab = MagicMock()
     with patch("PIL.ImageGrab.grab", mock_grab):
         res = cap.capture(dry_run=False)
         assert res.success is True
         assert res.dry_run is False
-        mock_grab.assert_called_once_with(bbox=None)
+        mock_grab.assert_called_once_with(all_screens=True)
+
+    # Explicit geometry still captures just that region
+    mock_grab_geo = MagicMock()
+    with patch("PIL.ImageGrab.grab", mock_grab_geo):
+        cap.capture(geometry="10,20,100,200", dry_run=False)
+        mock_grab_geo.assert_called_once_with(bbox=(10, 20, 110, 220))
 
     # Test selected region
     with patch("PIL.ImageGrab.grab", mock_grab):

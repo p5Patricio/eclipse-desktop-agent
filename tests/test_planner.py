@@ -402,6 +402,40 @@ def test_vision_adapter_sends_openai_compatible_image_payload(tmp_path):
     assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
 
+def test_encode_image_downscales_large_images(tmp_path):
+    import base64
+    import io
+
+    from PIL import Image
+
+    from eclipse_agent.planner import VISION_MAX_IMAGE_DIM, encode_image_as_data_url
+
+    big = tmp_path / "big.png"
+    Image.new("RGB", (3000, 2000), "white").save(big)
+
+    header, b64 = encode_image_as_data_url(big).split(",", 1)
+    assert header == "data:image/png;base64"
+    with Image.open(io.BytesIO(base64.b64decode(b64))) as decoded:
+        assert max(decoded.size) == VISION_MAX_IMAGE_DIM
+        assert decoded.size == (1280, 853)
+
+
+def test_encode_image_keeps_small_images(tmp_path):
+    import base64
+    import io
+
+    from PIL import Image
+
+    from eclipse_agent.planner import encode_image_as_data_url
+
+    small = tmp_path / "small.png"
+    Image.new("RGB", (200, 100), "white").save(small)
+
+    _, b64 = encode_image_as_data_url(small).split(",", 1)
+    with Image.open(io.BytesIO(base64.b64decode(b64))) as decoded:
+        assert decoded.size == (200, 100)
+
+
 def test_vision_adapter_reports_missing_ollama_model(tmp_path):
     image_path = tmp_path / "screen.jpg"
     image_path.write_bytes(b"\xff\xd8fake-jpeg\xff\xd9")
