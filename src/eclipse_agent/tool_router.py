@@ -206,6 +206,20 @@ class NativeMCPClient:
                 action_kinds=(ActionKind.SET_REMINDER,),
                 risk_level=RiskLevel.LOW,
             ),
+            MCPToolDefinition(
+                name="remember_fact",
+                server_name="native",
+                description="Remember a fact or preference the user shared",
+                action_kinds=(ActionKind.REMEMBER_FACT,),
+                risk_level=RiskLevel.LOW,
+            ),
+            MCPToolDefinition(
+                name="recall_memory",
+                server_name="native",
+                description="Recall a remembered fact or preference",
+                action_kinds=(ActionKind.RECALL_MEMORY,),
+                risk_level=RiskLevel.LOW,
+            ),
         )
 
     def call_tool(self, tool: MCPToolDefinition, arguments: dict[str, Any]) -> NativeToolResult:
@@ -225,6 +239,10 @@ class NativeMCPClient:
             return self._answer_question(arguments)
         if tool.name == "set_reminder":
             return self._set_reminder(arguments)
+        if tool.name == "remember_fact":
+            return self._remember_fact(arguments)
+        if tool.name == "recall_memory":
+            return self._recall_memory(arguments)
         return NativeToolResult(isError=True, _message=f"Unknown native tool: {tool.name}")
 
     def _open_url(self, arguments: dict[str, Any]) -> NativeToolResult:
@@ -415,6 +433,54 @@ class NativeMCPClient:
         return _native_success(
             action_type="read_clipboard",
             target="clipboard",
+            message=spoken,
+            extra_facts={"spoken": spoken},
+        )
+
+    def _remember_fact(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.memory import MemoryStore
+
+        key = str(arguments.get("memory_key", "") or "").strip()
+        value = str(arguments.get("memory_value", "") or arguments.get("target", "")).strip()
+        if not key or not value:
+            return _native_failure(
+                action_type="remember_fact",
+                target=key or "memory",
+                reason="Tell me what to remember, like 'mi nombre es Patricio'.",
+            )
+        MemoryStore().remember(key, value)
+        spoken = "Listo, lo voy a recordar."
+        return _native_success(
+            action_type="remember_fact",
+            target=key,
+            message=spoken,
+            extra_facts={"spoken": spoken},
+        )
+
+    def _recall_memory(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.memory import MemoryStore, spoken_fact, spoken_facts
+
+        key = str(arguments.get("memory_key", "") or "").strip()
+        store = MemoryStore()
+        if not key:
+            spoken = spoken_facts(store.list_all())
+            return _native_success(
+                action_type="recall_memory",
+                target="memory",
+                message=spoken,
+                extra_facts={"spoken": spoken},
+            )
+        fact = store.recall(key)
+        if fact is None:
+            matches = store.search(key)
+            fact = matches[0] if matches else None
+        if fact is None:
+            spoken = f"No tengo guardado tu {key} todavía."
+        else:
+            spoken = spoken_fact(fact.key, fact.value)
+        return _native_success(
+            action_type="recall_memory",
+            target=key,
             message=spoken,
             extra_facts={"spoken": spoken},
         )

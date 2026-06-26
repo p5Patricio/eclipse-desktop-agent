@@ -31,6 +31,12 @@ from eclipse_agent.desktop_control import (
 )
 from eclipse_agent.answer import answer_question_from_env, render_answer_result
 from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
+from eclipse_agent.memory import (
+    MemoryIntent,
+    MemoryStore,
+    parse_memory_request,
+    render_memory_facts,
+)
 from eclipse_agent.reminders import (
     ReminderStore,
     expires_after_seconds,
@@ -410,6 +416,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("reminders-list", help="List pending reminders.")
+
+    remember = subparsers.add_parser(
+        "remember",
+        help="Remember a fact or preference across sessions.",
+    )
+    remember.add_argument(
+        "--text",
+        help="Natural phrase, e.g. 'mi nombre es Patricio'.",
+    )
+    remember.add_argument("--key", help="Explicit fact key (use with --value).")
+    remember.add_argument("--value", help="Explicit fact value (use with --key).")
+
+    subparsers.add_parser("memory-list", help="List remembered facts.")
+
+    memory_recall = subparsers.add_parser("memory-recall", help="Recall a remembered fact.")
+    memory_recall.add_argument("--key", required=True, help="The fact key to recall.")
+
+    memory_forget = subparsers.add_parser("memory-forget", help="Forget a remembered fact.")
+    memory_forget.add_argument("--key", required=True, help="The fact key to forget.")
 
     reminders_check = subparsers.add_parser(
         "reminders-check",
@@ -1114,6 +1139,48 @@ def _cmd_reminders_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_remember(args: argparse.Namespace) -> int:
+    store = MemoryStore()
+    if args.key:
+        if not args.value:
+            print("Provide --value together with --key.")
+            return 1
+        fact = store.remember(args.key, args.value)
+    elif args.text:
+        request = parse_memory_request(args.text)
+        if request is None or request.intent is not MemoryIntent.REMEMBER:
+            print("Could not parse a fact. Use --key/--value or 'mi nombre es Patricio'.")
+            return 1
+        fact = store.remember(request.key, request.value)
+    else:
+        print("Provide --text or --key/--value.")
+        return 1
+    print(f"Remembered {fact.key}: {fact.value}")
+    return 0
+
+
+def _cmd_memory_list(args: argparse.Namespace) -> int:
+    print(render_memory_facts(MemoryStore().list_all()))
+    return 0
+
+
+def _cmd_memory_recall(args: argparse.Namespace) -> int:
+    fact = MemoryStore().recall(args.key)
+    if fact is None:
+        print(f"No memory for {args.key}.")
+        return 1
+    print(f"{fact.key}: {fact.value}")
+    return 0
+
+
+def _cmd_memory_forget(args: argparse.Namespace) -> int:
+    if MemoryStore().forget(args.key):
+        print(f"Forgot {args.key}.")
+        return 0
+    print(f"No memory for {args.key}.")
+    return 1
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
     print(render_answer_result(result))
@@ -1390,6 +1457,10 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "remind": _cmd_remind,
     "reminders-list": _cmd_reminders_list,
     "reminders-check": _cmd_reminders_check,
+    "remember": _cmd_remember,
+    "memory-list": _cmd_memory_list,
+    "memory-recall": _cmd_memory_recall,
+    "memory-forget": _cmd_memory_forget,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

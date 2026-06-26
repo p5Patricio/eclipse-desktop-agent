@@ -154,6 +154,13 @@ eclipse-agent remind --text "llamar a Ana" --seconds 600
 eclipse-agent reminders-list
 eclipse-agent reminders-check --speak
 
+:: Memoria persistente (recuerda hechos entre sesiones)
+eclipse-agent remember --text "mi nombre es Patricio"
+eclipse-agent remember --key "color favorito" --value "azul"
+eclipse-agent memory-list
+eclipse-agent memory-recall --key nombre
+eclipse-agent memory-forget --key nombre
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -196,6 +203,9 @@ daemon always-on
   proveedor LLM configurado (local o DeepSeek), con respuestas concisas pensadas para hablar.
 - **Recordatorios y timers**: agendá recordatorios por voz ("recordame en 10 minutos que…"),
   persistidos en SQLite y disparados automáticamente por el daemon de wake word.
+- **Memoria persistente**: recordá hechos y preferencias entre sesiones ("mi nombre es
+  Patricio", "¿cómo me llamo?"), guardados localmente en SQLite. Eclipse distingue una
+  pregunta sobre tu memoria de una pregunta general antes de responder.
 - **Automatización web** opcional vía `agent-browser`.
 - **Visión** de pantalla bajo demanda con un modelo multimodal local.
 - **Planificador híbrido**: reglas deterministas rápidas + capa LLM (local o DeepSeek) para
@@ -205,8 +215,8 @@ daemon always-on
 
 ## Almacenamiento local
 
-Eclipse guarda su estado bajo `%LOCALAPPDATA%\eclipse-agent\` (notificaciones y telemetría
-en SQLite).
+Eclipse guarda su estado bajo `%LOCALAPPDATA%\eclipse-agent\` en bases SQLite
+(notificaciones, telemetría, recordatorios y memoria de hechos).
 
 ## Arquitectura
 
