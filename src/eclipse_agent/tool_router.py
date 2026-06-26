@@ -207,6 +207,13 @@ class NativeMCPClient:
                 risk_level=RiskLevel.LOW,
             ),
             MCPToolDefinition(
+                name="add_routine",
+                server_name="native",
+                description="Schedule a recurring proactive routine",
+                action_kinds=(ActionKind.ADD_ROUTINE,),
+                risk_level=RiskLevel.LOW,
+            ),
+            MCPToolDefinition(
                 name="remember_fact",
                 server_name="native",
                 description="Remember a fact or preference the user shared",
@@ -239,6 +246,8 @@ class NativeMCPClient:
             return self._answer_question(arguments)
         if tool.name == "set_reminder":
             return self._set_reminder(arguments)
+        if tool.name == "add_routine":
+            return self._add_routine(arguments)
         if tool.name == "remember_fact":
             return self._remember_fact(arguments)
         if tool.name == "recall_memory":
@@ -433,6 +442,38 @@ class NativeMCPClient:
         return _native_success(
             action_type="read_clipboard",
             target="clipboard",
+            message=spoken,
+            extra_facts={"spoken": spoken},
+        )
+
+    def _add_routine(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.routines import RoutineAction, RoutineStore, ScheduleKind
+
+        message = str(arguments.get("routine_message", "") or arguments.get("target", "")).strip()
+        if not message:
+            return _native_failure(
+                action_type="add_routine",
+                target="routine",
+                reason="Tell me what to do, like 'cada mañana decime el resumen'.",
+            )
+        try:
+            kind = ScheduleKind(str(arguments.get("schedule_kind", "")))
+            action = RoutineAction(str(arguments.get("routine_action", "say")))
+        except ValueError:
+            return _native_failure(
+                action_type="add_routine",
+                target="routine",
+                reason="That schedule is not supported yet.",
+            )
+        value = str(arguments.get("schedule_value", "")).strip()
+        RoutineStore().add(message, kind, value, action=action)
+        if kind is ScheduleKind.DAILY:
+            spoken = f"Listo, te lo digo cada día a las {value}."
+        else:
+            spoken = "Listo, lo hago cada tanto."
+        return _native_success(
+            action_type="add_routine",
+            target="routine",
             message=spoken,
             extra_facts={"spoken": spoken},
         )

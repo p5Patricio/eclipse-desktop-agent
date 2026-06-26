@@ -161,6 +161,13 @@ eclipse-agent memory-list
 eclipse-agent memory-recall --key nombre
 eclipse-agent memory-forget --key nombre
 
+:: Rutinas proactivas (recurrentes, disparadas por el daemon)
+eclipse-agent routine-add --text "cada mañana a las 8 decime el resumen del día"
+eclipse-agent routine-add --name agua --message "tomá agua" --every-seconds 3600
+eclipse-agent routines-list
+eclipse-agent routine-remove --name agua
+eclipse-agent routines-check --speak
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -206,6 +213,9 @@ daemon always-on
 - **Memoria persistente**: recordá hechos y preferencias entre sesiones ("mi nombre es
   Patricio", "¿cómo me llamo?"), guardados localmente en SQLite. Eclipse distingue una
   pregunta sobre tu memoria de una pregunta general antes de responder.
+- **Rutinas proactivas**: agendá acciones recurrentes ("cada mañana a las 8 decime el
+  resumen", "cada 10 minutos recordame tomar agua"), diarias o por intervalo, que el daemon
+  dispara solo. La acción puede hablar un mensaje fijo o responderlo con el LLM.
 - **Automatización web** opcional vía `agent-browser`.
 - **Visión** de pantalla bajo demanda con un modelo multimodal local.
 - **Planificador híbrido**: reglas deterministas rápidas + capa LLM (local o DeepSeek) para
@@ -216,7 +226,7 @@ daemon always-on
 ## Almacenamiento local
 
 Eclipse guarda su estado bajo `%LOCALAPPDATA%\eclipse-agent\` en bases SQLite
-(notificaciones, telemetría, recordatorios y memoria de hechos).
+(notificaciones, telemetría, recordatorios, memoria de hechos y rutinas).
 
 ## Arquitectura
 

@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from eclipse_agent.coding_agents import CODING_AGENTS, get_coding_agent
 from eclipse_agent.memory import MemoryIntent, parse_memory_request
 from eclipse_agent.reminders import parse_reminder_request
+from eclipse_agent.routines import parse_routine_request
 from eclipse_agent.safety import RiskLevel
 from eclipse_agent.telemetry import ExecutionTelemetryStore, TelemetryLayer
 
@@ -108,6 +109,7 @@ class ActionKind(StrEnum):
     READ_CLIPBOARD = "read_clipboard"
     ANSWER_QUESTION = "answer_question"
     SET_REMINDER = "set_reminder"
+    ADD_ROUTINE = "add_routine"
     REMEMBER_FACT = "remember_fact"
     RECALL_MEMORY = "recall_memory"
     UNKNOWN = "unknown"
@@ -698,6 +700,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if coding_action:
         return (coding_action,)
 
+    routine_action = _maybe_routine_action(clause, lowered, start_index)
+    if routine_action:
+        return (routine_action,)
+
     reminder_action = _maybe_set_reminder_action(clause, lowered, start_index)
     if reminder_action:
         return (reminder_action,)
@@ -948,6 +954,26 @@ def _maybe_system_control_action(clause: str, lowered: str, index: int) -> Plann
         target=action,
         parameters={"system_action": action},
         tool_name="native.system_control",
+    )
+
+
+def _maybe_routine_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    request = parse_routine_request(clause)
+    if request is None:
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.ADD_ROUTINE,
+        description="Schedule a recurring proactive routine.",
+        risk_level=RiskLevel.LOW,
+        target="routine",
+        parameters={
+            "routine_message": request.message,
+            "routine_action": request.action.value,
+            "schedule_kind": request.schedule_kind.value,
+            "schedule_value": request.schedule_value,
+        },
+        tool_name="native.add_routine",
     )
 
 

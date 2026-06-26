@@ -22,6 +22,11 @@ from eclipse_agent.notification_intents import (
 from eclipse_agent.notifications import NotificationStore
 from eclipse_agent.planner import create_action_plan
 from eclipse_agent.reminders import ReminderStore, fire_due_reminders
+from eclipse_agent.routines import (
+    RoutineStore,
+    default_routine_answer,
+    fire_due_routines,
+)
 from eclipse_agent.response_formatter import ActionResponseFormatter
 from eclipse_agent.tool_router import (
     NativeMCPClient,
@@ -138,6 +143,7 @@ class WakeRuntime:
         store: NotificationStore | None = None,
         response_formatter: ActionResponseFormatter | None = None,
         reminder_store: ReminderStore | None = None,
+        routine_store: RoutineStore | None = None,
     ) -> None:
         self.listener = listener
         self.listener_factory = listener_factory
@@ -147,6 +153,7 @@ class WakeRuntime:
         self.store = store or NotificationStore()
         self.response_formatter = response_formatter or ActionResponseFormatter()
         self.reminder_store = reminder_store
+        self.routine_store = routine_store
 
         self.status = "idle"
         self.pending_command = None
@@ -154,6 +161,8 @@ class WakeRuntime:
         self._server_thread = None
         self._reminder_thread = None
         self._reminder_stop = None
+        self._routine_thread = None
+        self._routine_stop = None
         try:
             self._start_status_server()
         except OSError:
@@ -218,6 +227,43 @@ class WakeRuntime:
             except Exception:
                 pass
             self._reminder_thread = None
+
+    def _poll_routines_once(self, *, dry_run: bool) -> tuple:
+        """Fire any due routines once, speaking each. Returns the fired routines."""
+        if self.routine_store is None:
+            return ()
+        return fire_due_routines(
+            self.routine_store,
+            lambda text: self.tts.speak(text, dry_run=dry_run),
+            answer=default_routine_answer,
+        )
+
+    def start_routine_poller(self, *, dry_run: bool, interval: float = 20.0) -> None:
+        """Start a background thread that runs routines as they come due."""
+        if self.routine_store is None:
+            self.routine_store = RoutineStore()
+        self._routine_stop = threading.Event()
+
+        def loop() -> None:
+            while not self._routine_stop.wait(interval):
+                try:
+                    self._poll_routines_once(dry_run=dry_run)
+                except Exception:
+                    pass
+
+        self._routine_thread = threading.Thread(target=loop, daemon=True)
+        self._routine_thread.start()
+
+    def stop_routine_poller(self) -> None:
+        """Stop the routine poller thread if it is running."""
+        if self._routine_stop is not None:
+            self._routine_stop.set()
+        if self._routine_thread is not None:
+            try:
+                self._routine_thread.join(timeout=0.5)
+            except Exception:
+                pass
+            self._routine_thread = None
 
 
     def run(

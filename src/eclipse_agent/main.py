@@ -44,6 +44,14 @@ from eclipse_agent.reminders import (
     parse_reminder_request,
     render_reminders,
 )
+from eclipse_agent.routines import (
+    RoutineAction,
+    RoutineStore,
+    ScheduleKind,
+    fire_due_routines,
+    parse_routine_request,
+    render_routines,
+)
 from eclipse_agent.system_control import SystemAction, render_system_control_result
 from eclipse_agent.pal.factory import PlatformFactory
 from eclipse_agent.notification_intents import (
@@ -435,6 +443,40 @@ def build_parser() -> argparse.ArgumentParser:
 
     memory_forget = subparsers.add_parser("memory-forget", help="Forget a remembered fact.")
     memory_forget.add_argument("--key", required=True, help="The fact key to forget.")
+
+    routine_add = subparsers.add_parser(
+        "routine-add",
+        help="Schedule a recurring proactive routine.",
+    )
+    routine_add.add_argument(
+        "--text",
+        help="Natural phrase, e.g. 'cada mañana a las 8 decime el resumen'.",
+    )
+    routine_add.add_argument("--name", help="Routine name. Auto-generated if omitted.")
+    routine_add.add_argument("--message", help="What to say or ask when it fires.")
+    routine_add.add_argument(
+        "--action",
+        default="say",
+        choices=[action.value for action in RoutineAction],
+        help="say speaks the message; ask answers it with the LLM provider.",
+    )
+    routine_add.add_argument("--daily-at", help="Daily local time, e.g. 08:00.")
+    routine_add.add_argument("--every-seconds", type=int, help="Interval in seconds.")
+
+    subparsers.add_parser("routines-list", help="List scheduled routines.")
+
+    routine_remove = subparsers.add_parser("routine-remove", help="Remove a routine.")
+    routine_remove.add_argument("--name", required=True, help="The routine name to remove.")
+
+    routines_check = subparsers.add_parser(
+        "routines-check",
+        help="Fire routines that are due now.",
+    )
+    routines_check.add_argument(
+        "--speak",
+        action="store_true",
+        help="Actually speak due routines instead of dry-running.",
+    )
 
     reminders_check = subparsers.add_parser(
         "reminders-check",
@@ -958,6 +1000,7 @@ def _cmd_wake_efficient(args: argparse.Namespace) -> int:
         store=_notification_store(args),
     )
     runtime.start_reminder_poller(dry_run=not args.execute)
+    runtime.start_routine_poller(dry_run=not args.execute)
     result = runtime.run_efficient(
         iterations=args.iterations,
         command_seconds=args.command_seconds,
@@ -1179,6 +1222,62 @@ def _cmd_memory_forget(args: argparse.Namespace) -> int:
         return 0
     print(f"No memory for {args.key}.")
     return 1
+
+
+def _cmd_routine_add(args: argparse.Namespace) -> int:
+    store = RoutineStore()
+    if args.text:
+        request = parse_routine_request(args.text)
+        if request is None:
+            print("Could not parse a routine. Use --message with --daily-at or --every-seconds.")
+            return 1
+        routine = store.add(
+            request.message,
+            request.schedule_kind,
+            request.schedule_value,
+            name=args.name,
+            action=request.action,
+        )
+    elif args.message and (args.daily_at or args.every_seconds):
+        if args.daily_at:
+            kind, value = ScheduleKind.DAILY, args.daily_at
+        else:
+            kind, value = ScheduleKind.INTERVAL, str(args.every_seconds)
+        routine = store.add(
+            args.message, kind, value, name=args.name, action=RoutineAction(args.action)
+        )
+    else:
+        print("Provide --text, or --message with --daily-at or --every-seconds.")
+        return 1
+    print(f"Routine '{routine.name}' scheduled, next run {routine.next_run.isoformat()}")
+    return 0
+
+
+def _cmd_routines_list(args: argparse.Namespace) -> int:
+    print(render_routines(RoutineStore().list_all()))
+    return 0
+
+
+def _cmd_routine_remove(args: argparse.Namespace) -> int:
+    if RoutineStore().remove(args.name):
+        print(f"Removed routine '{args.name}'.")
+        return 0
+    print(f"No routine named '{args.name}'.")
+    return 1
+
+
+def _cmd_routines_check(args: argparse.Namespace) -> int:
+    tts = SystemTTS()
+    fired = fire_due_routines(
+        RoutineStore(),
+        lambda text: tts.speak(text, dry_run=not args.speak),
+    )
+    if not fired:
+        print("No routines are due.")
+        return 0
+    for routine in fired:
+        print(f"Fired: {routine.name}")
+    return 0
 
 
 def _cmd_ask(args: argparse.Namespace) -> int:
@@ -1461,6 +1560,10 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "memory-list": _cmd_memory_list,
     "memory-recall": _cmd_memory_recall,
     "memory-forget": _cmd_memory_forget,
+    "routine-add": _cmd_routine_add,
+    "routines-list": _cmd_routines_list,
+    "routine-remove": _cmd_routine_remove,
+    "routines-check": _cmd_routines_check,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,
