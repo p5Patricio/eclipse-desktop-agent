@@ -56,6 +56,9 @@ Extras opcionales:
 :: Escucha real de notificaciones de Windows
 .venv\Scripts\python -m pip install -e ".[notifications]"
 
+:: Lectura de PDFs para Q&A sobre documentos
+.venv\Scripts\python -m pip install -e ".[documents]"
+
 :: Automatización web (CLI externa de Node)
 npm install -g agent-browser
 ```
@@ -87,6 +90,10 @@ OPENAI_API_KEY=
 
 # Visión de pantalla (se mantiene local: DeepSeek no tiene modelo multimodal)
 # ECLIPSE_VISION_MODEL=qwen2.5vl:7b
+
+# Embeddings para Q&A sobre documentos (local por defecto; DeepSeek no tiene embeddings)
+# ECLIPSE_EMBED_MODEL=nomic-embed-text
+# ECLIPSE_EMBED_BASE_URL=
 
 # Voz y wake word
 # ECLIPSE_WHISPER_MODEL=small
@@ -172,6 +179,12 @@ eclipse-agent routines-check --speak
 eclipse-agent play-media --query "El lado oscuro"
 eclipse-agent play-media --app "YouTube Music" --query "El lado oscuro" --execute --confirmed
 
+:: Q&A sobre tus notas/PDFs (requiere modelo de embeddings, p. ej. Ollama nomic-embed-text)
+eclipse-agent docs-add --path C:\ruta\a\notas
+eclipse-agent docs-list
+eclipse-agent docs-ask --query "¿qué dije sobre el deploy?"
+eclipse-agent docs-clear
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -217,6 +230,10 @@ daemon always-on
 - **Memoria persistente**: recordá hechos y preferencias entre sesiones ("mi nombre es
   Patricio", "¿cómo me llamo?"), guardados localmente en SQLite. Eclipse distingue una
   pregunta sobre tu memoria de una pregunta general antes de responder.
+- **Q&A sobre documentos (RAG)**: ingestá notas y PDFs locales y preguntales por voz o CLI
+  ("según mis notas, ¿qué dije del deploy?"). Embeddings provider-agnostic (Ollama
+  `nomic-embed-text` por defecto) + búsqueda por similitud coseno en SQLite, sin base
+  vectorial externa.
 - **Rutinas proactivas**: agendá acciones recurrentes ("cada mañana a las 8 decime el
   resumen", "cada 10 minutos recordame tomar agua"), diarias o por intervalo, que el daemon
   dispara solo. La acción puede hablar un mensaje fijo o responderlo con el LLM.
@@ -234,7 +251,7 @@ daemon always-on
 ## Almacenamiento local
 
 Eclipse guarda su estado bajo `%LOCALAPPDATA%\eclipse-agent\` en bases SQLite
-(notificaciones, telemetría, recordatorios, memoria de hechos y rutinas).
+(notificaciones, telemetría, recordatorios, memoria de hechos, rutinas y documentos).
 
 ## Arquitectura
 

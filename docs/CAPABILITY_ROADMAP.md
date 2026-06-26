@@ -15,6 +15,7 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 | Memoria persistente de hechos/preferencias | ✅ | `remember`, `memory-list`, `memory-recall`, `memory-forget` |
 | Rutinas proactivas (diarias o por intervalo) | ✅ | `routine-add`, `routines-list`, `routine-remove`, `routines-check` |
 | Reproducir en apps web (YouTube Music) | ✅ orquestación; requiere `agent-browser` + sesión | `play-media` |
+| Q&A sobre notas/PDFs (RAG) | ✅ pipeline; requiere modelo de embeddings (Ollama) | `docs-add`, `docs-list`, `docs-ask`, `docs-clear` |
 
 ## Estado de la plataforma
 
@@ -31,7 +32,8 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 | Notificaciones | Core SQLite + listener winrt + intents + reply | Pruebas reales con sitios autenticados |
 | Visión de pantalla | Captura + análisis local + redacción | Mejorar detección de zonas sensibles |
 | Agentes de codificación | Prompt contract | Launcher con confirmación y kill switch |
-| Memoria local | SQLite: notificaciones, telemetría, recordatorios, hechos, rutinas | Permission store y audit log |
+| Memoria local | SQLite: notificaciones, telemetría, recordatorios, hechos, rutinas, documentos | Permission store y audit log |
+| Q&A de documentos (RAG) | Pipeline embeddings + coseno en SQLite (sin base vectorial) | Verificar con un modelo de embeddings real (Ollama) |
 | Seguridad | Draft-first + confirmaciones + redactor | Kill switch y panel de permisos |
 | Entorno | venv reproducible (`setup.bat`) + CI en Windows | — |
 
@@ -39,8 +41,6 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 
 ### Profundidad (depende de credenciales o modelos externos)
 
-- **RAG sobre notas/PDFs**: Q&A sobre documentos locales. Requiere un backend de embeddings
-  (Ollama `nomic-embed-text` u OpenAI) y reintroducir un store vectorial.
 - **Calendario / email**: leer agenda, resumir bandeja, redactar respuestas. Requiere OAuth
   de Google o un MCP server con acceso a las cuentas.
 - **Verificación real de reproducción web**: instalar `agent-browser` y abrir sesión para

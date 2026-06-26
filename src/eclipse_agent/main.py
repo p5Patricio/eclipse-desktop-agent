@@ -31,6 +31,15 @@ from eclipse_agent.desktop_control import (
 )
 from eclipse_agent.answer import answer_question_from_env, render_answer_result
 from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
+from eclipse_agent.documents import (
+    DocumentStore,
+    EmbeddingClient,
+    answer_from_documents,
+    ingest_path,
+    render_document_answer,
+    render_document_sources,
+    render_ingest_result,
+)
 from eclipse_agent.media_playback import (
     MediaPlaybackWorkflow,
     render_media_playback_result,
@@ -481,6 +490,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Actually speak due routines instead of dry-running.",
     )
+
+    docs_add = subparsers.add_parser(
+        "docs-add",
+        help="Ingest notes/PDFs into the local document store for Q&A.",
+    )
+    docs_add.add_argument("--path", required=True, help="File or directory to ingest.")
+
+    subparsers.add_parser("docs-list", help="List ingested documents.")
+    subparsers.add_parser("docs-clear", help="Remove all ingested documents.")
+
+    docs_ask = subparsers.add_parser(
+        "docs-ask",
+        help="Answer a question grounded in your ingested documents.",
+    )
+    docs_ask.add_argument("--query", required=True, help="The question to answer.")
 
     play_media = subparsers.add_parser(
         "play-media",
@@ -1316,6 +1340,29 @@ def _cmd_play_media(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _cmd_docs_add(args: argparse.Namespace) -> int:
+    result = ingest_path(args.path, DocumentStore(), EmbeddingClient().embed)
+    print(render_ingest_result(result))
+    return 0 if result.success else 1
+
+
+def _cmd_docs_list(args: argparse.Namespace) -> int:
+    print(render_document_sources(DocumentStore().sources()))
+    return 0
+
+
+def _cmd_docs_clear(args: argparse.Namespace) -> int:
+    removed = DocumentStore().clear()
+    print(f"Cleared {removed} document chunks.")
+    return 0
+
+
+def _cmd_docs_ask(args: argparse.Namespace) -> int:
+    result = answer_from_documents(args.query, DocumentStore())
+    print(render_document_answer(result))
+    return 0 if result.success else 1
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
     print(render_answer_result(result))
@@ -1601,6 +1648,10 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "routine-remove": _cmd_routine_remove,
     "routines-check": _cmd_routines_check,
     "play-media": _cmd_play_media,
+    "docs-add": _cmd_docs_add,
+    "docs-list": _cmd_docs_list,
+    "docs-clear": _cmd_docs_clear,
+    "docs-ask": _cmd_docs_ask,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

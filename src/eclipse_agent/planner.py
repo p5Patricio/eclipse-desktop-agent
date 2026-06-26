@@ -108,6 +108,7 @@ class ActionKind(StrEnum):
     SYSTEM_CONTROL = "system_control"
     READ_CLIPBOARD = "read_clipboard"
     ANSWER_QUESTION = "answer_question"
+    QUERY_DOCUMENTS = "query_documents"
     SET_REMINDER = "set_reminder"
     ADD_ROUTINE = "add_routine"
     REMEMBER_FACT = "remember_fact"
@@ -744,6 +745,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if screenshot_action:
         return (screenshot_action,)
 
+    documents_action = _maybe_query_documents_action(clause, lowered, start_index)
+    if documents_action:
+        return (documents_action,)
+
     answer_action = _maybe_answer_question_action(clause, lowered, start_index)
     if answer_action:
         return (answer_action,)
@@ -1022,6 +1027,29 @@ def _maybe_memory_action(clause: str, lowered: str, index: int) -> PlannedAction
         target=request.key or "memory",
         parameters={"memory_key": request.key},
         tool_name="native.recall_memory",
+    )
+
+
+_DOCUMENT_TOKENS = (
+    "mis notas", "mis documentos", "mis apuntes", "mis docs", "mis pdfs",
+    "según mis notas", "my notes", "my documents", "my docs", "my pdfs",
+)
+
+
+def _maybe_query_documents_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(token in lowered for token in _DOCUMENT_TOKENS):
+        return None
+    question = re.sub(r"^\s*eclipse,?\s*", "", clause, flags=re.IGNORECASE).strip()
+    if not question:
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.QUERY_DOCUMENTS,
+        description="Answer a question grounded in the user's documents.",
+        risk_level=RiskLevel.LOW,
+        target="documents",
+        parameters={"question": question},
+        tool_name="native.query_documents",
     )
 
 

@@ -36,9 +36,11 @@ class QuestionAnswerer:
         config: LLMPlannerConfig | None = None,
         *,
         client: object | None = None,
+        system_prompt: str = ANSWER_SYSTEM_PROMPT,
     ) -> None:
         self.config = config or LLMPlannerConfig()
         self._client = client
+        self.system_prompt = system_prompt
 
     @property
     def client(self) -> object:
@@ -64,7 +66,7 @@ class QuestionAnswerer:
             completion = self.client.chat.completions.create(  # type: ignore[attr-defined]
                 model=self.config.model,
                 messages=[
-                    {"role": "system", "content": ANSWER_SYSTEM_PROMPT},
+                    {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": normalized},
                 ],
                 temperature=0.3,

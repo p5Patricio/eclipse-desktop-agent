@@ -35,6 +35,9 @@ dev = [
 voice = [
   "faster-whisper>=1.2",
 ]
+documents = [
+  "pypdf>=4.0",
+]
 notifications = [
   "winrt-Windows.UI.Notifications.Management>=2.0",
 ]

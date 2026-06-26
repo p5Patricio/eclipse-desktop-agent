@@ -200,6 +200,13 @@ class NativeMCPClient:
                 risk_level=RiskLevel.LOW,
             ),
             MCPToolDefinition(
+                name="query_documents",
+                server_name="native",
+                description="Answer a question grounded in the user's ingested documents",
+                action_kinds=(ActionKind.QUERY_DOCUMENTS,),
+                risk_level=RiskLevel.LOW,
+            ),
+            MCPToolDefinition(
                 name="set_reminder",
                 server_name="native",
                 description="Set a reminder or timer",
@@ -251,6 +258,8 @@ class NativeMCPClient:
             return self._read_clipboard(arguments)
         if tool.name == "answer_question":
             return self._answer_question(arguments)
+        if tool.name == "query_documents":
+            return self._query_documents(arguments)
         if tool.name == "set_reminder":
             return self._set_reminder(arguments)
         if tool.name == "play_media":
@@ -434,6 +443,30 @@ class NativeMCPClient:
         return _native_failure(
             action_type="answer_question",
             target="answer",
+            reason=result.message,
+        )
+
+    def _query_documents(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.documents import DocumentStore, answer_from_documents
+
+        question = str(arguments.get("question", "") or arguments.get("target", "")).strip()
+        if not question:
+            return _native_failure(
+                action_type="query_documents",
+                target="documents",
+                reason="Tell me what to look up in your documents.",
+            )
+        result = answer_from_documents(question, DocumentStore())
+        if result.success:
+            return _native_success(
+                action_type="query_documents",
+                target="documents",
+                message=result.answer,
+                extra_facts={"spoken": result.answer},
+            )
+        return _native_failure(
+            action_type="query_documents",
+            target="documents",
             reason=result.message,
         )
 

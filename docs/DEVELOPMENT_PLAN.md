@@ -63,10 +63,10 @@ Capacidades ya implementadas (voz + CLI):
 - Memoria persistente de hechos y preferencias entre sesiones.
 - Rutinas proactivas (diarias o por intervalo), disparadas por el daemon.
 - Reproducir en apps web (YouTube Music) vía el adapter de navegador.
+- Q&A sobre notas/PDFs (RAG): embeddings + similitud coseno en SQLite.
 
 Pendiente (depende de setup externo):
 
-- RAG sobre notas/PDFs (requiere backend de embeddings).
 - Calendario/email (requiere OAuth de Google o un MCP server).
 - Verificación real de reproducción web (requiere `agent-browser` + sesión iniciada).
 
@@ -84,7 +84,7 @@ Pendiente de endurecimiento:
 - Atajo global de push-to-talk.
 - Modelo de wake word `Eclipse` propio que pase evaluación.
 - Verificación real del round-trip de DeepSeek con una API key.
-- RAG sobre notas/PDFs con un backend de embeddings.
+- Verificación real del RAG con un modelo de embeddings (Ollama `nomic-embed-text`).
 - Calendario/email vía OAuth o MCP server.
 - Reply-draft web para Instagram/Messenger (búsqueda y reproducción en YouTube Music ya
   implementadas; falta verificación real con `agent-browser`).

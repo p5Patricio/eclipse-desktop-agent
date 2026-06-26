@@ -63,6 +63,7 @@ Verification + Response
 | `reminders` | Recordatorios y timers (SQLite), disparados por el daemon |
 | `memory` | Memoria persistente de hechos y preferencias (SQLite) |
 | `routines` | Rutinas proactivas recurrentes (SQLite), disparadas por el daemon |
+| `documents` | Q&A (RAG) sobre notas/PDFs: embeddings + similitud coseno en SQLite |
 | `response_formatter` | Construye la respuesta hablada a partir del resultado de la acción |
 | `pal/` | **Platform Abstraction Layer** de Windows: ventanas, input, captura, lanzador, notificaciones, voz, daemon |
 | `safety/` | Política de riesgo y redacción de capturas |
@@ -92,7 +93,9 @@ datos (`LLMProvider`), no una jerarquía de clases.
 | `openai` | api.openai.com | json_schema estricto | sí |
 
 Se elige con `--provider` o `ECLIPSE_LLM_PROVIDER`. La visión de pantalla se mantiene local
-(qwen2.5vl) porque DeepSeek no expone un modelo multimodal.
+(qwen2.5vl) porque DeepSeek no expone un modelo multimodal. Lo mismo aplica a los embeddings
+para Q&A de documentos: corren por un modelo local (Ollama `nomic-embed-text`) por defecto,
+configurable con `ECLIPSE_EMBED_MODEL` / `ECLIPSE_EMBED_BASE_URL`.
 
 ## Loop de ejecución
 
