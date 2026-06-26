@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from eclipse_agent.answer import AnswerResult, QuestionAnswerer
+from eclipse_agent.planner import build_planner_config_from_env
 
 DEFAULT_EMBEDDING_BASE_URL = "http://localhost:11434/v1"
 DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
@@ -380,7 +381,10 @@ def answer_from_documents(
             False, normalized, "", "Todavía no tengo documentos cargados."
         )
     context = "\n\n".join(f"[{Path(item.chunk.source).name}] {item.chunk.text}" for item in retrieved)
-    resolver = answerer or QuestionAnswerer(system_prompt=RAG_SYSTEM_PROMPT)
+    resolver = answerer or QuestionAnswerer(
+        build_planner_config_from_env(endpoint_url=None, model=None),
+        system_prompt=RAG_SYSTEM_PROMPT,
+    )
     answer = resolver.answer(f"Context:\n{context}\n\nQuestion: {normalized}")
     sources = tuple(dict.fromkeys(Path(item.chunk.source).name for item in retrieved))
     return DocumentAnswerResult(answer.success, normalized, answer.answer, answer.message, sources)
