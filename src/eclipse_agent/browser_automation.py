@@ -8,6 +8,7 @@ allowlists, and executes only when explicitly requested by the caller.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -284,7 +285,8 @@ class AgentBrowserAdapter:
                 metadata=request.metadata,
             )
 
-        if not shutil.which(self.profile.binary):
+        resolved = shutil.which(self.profile.binary)
+        if not resolved:
             return BrowserAutomationResult(
                 success=False,
                 kind=request.kind,
@@ -295,7 +297,7 @@ class AgentBrowserAdapter:
             )
 
         completed = subprocess.run(  # noqa: S603
-            command,
+            _executable_command(resolved, command),
             text=True,
             capture_output=True,
             check=False,
@@ -532,6 +534,21 @@ def render_browser_interaction_plan(plan: BrowserInteractionPlan) -> str:
                 for element in snapshot.elements[:8]:
                     lines.append(f"    - {element.ref} {element.role}: {element.name}")
     return "\n".join(lines)
+
+
+def _executable_command(resolved: str, command: tuple[str, ...]) -> tuple[str, ...]:
+    """Build a launchable argv from a resolved binary path.
+
+    On Windows, npm installs the CLI as a ``.cmd``/``.bat`` wrapper that
+    ``CreateProcess`` cannot execute directly (bare-name lookup fails, and batch
+    files are not real executables), so route those through ``cmd /c``. On other
+    platforms, just use the resolved path as argv[0].
+    """
+
+    tail = tuple(command[1:])
+    if os.name == "nt" and resolved.casefold().endswith((".cmd", ".bat")):
+        return ("cmd", "/c", resolved, *tail)
+    return (resolved, *tail)
 
 
 def shlex_join(command: tuple[str, ...]) -> str:

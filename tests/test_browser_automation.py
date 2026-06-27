@@ -1,3 +1,5 @@
+import os
+
 from eclipse_agent.browser_automation import (
     AgentBrowserAdapter,
     BrowserActionStatus,
@@ -8,12 +10,34 @@ from eclipse_agent.browser_automation import (
     BrowserInteractionPlan,
     BrowserInteractionStep,
     BrowserInteractionLoop,
+    _executable_command,
     domain_from_url,
     parse_agent_browser_snapshot_json,
     render_browser_interaction_plan,
     validate_browser_url,
     validate_snapshot_ref,
 )
+
+
+def test_executable_command_routes_windows_cmd_wrapper_through_cmd():
+    # On Windows, npm installs a .CMD wrapper that CreateProcess can't launch
+    # directly, so it must go through `cmd /c` with the resolved full path.
+    resolved = "C:\\Users\\me\\AppData\\Roaming\\npm\\agent-browser.CMD"
+    command = ("agent-browser", "--session", "x", "open", "https://example.com")
+
+    result = _executable_command(resolved, command)
+
+    if os.name == "nt":
+        assert result == ("cmd", "/c", resolved, *command[1:])
+    else:
+        assert result == (resolved, *command[1:])
+
+
+def test_executable_command_uses_plain_path_for_real_executable():
+    resolved = "/usr/local/bin/agent-browser"
+    command = ("agent-browser", "open", "https://example.com")
+
+    assert _executable_command(resolved, command) == (resolved, *command[1:])
 
 
 def test_agent_browser_open_url_builds_allowed_domain_command(tmp_path):
