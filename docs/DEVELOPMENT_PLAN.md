@@ -65,10 +65,7 @@ Capacidades ya implementadas (voz + CLI):
 - Reproducir en apps web (YouTube Music) vía el adapter de navegador.
 - Q&A sobre notas/PDFs (RAG): embeddings + similitud coseno en SQLite.
 - Email (lectura): leer/resumir bandeja y redactar borradores por IMAP — nunca envía.
-
-Pendiente (depende de setup externo):
-
-- Calendario (CalDAV) para leer la agenda (requiere app password).
+- Agenda del calendario (lectura): leer próximos eventos desde una URL iCal — read-only.
 - Verificación real de reproducción web (requiere `agent-browser` + sesión iniciada).
 
 Pendiente de endurecimiento:
@@ -85,8 +82,7 @@ Pendiente de endurecimiento:
 - Atajo global de push-to-talk.
 - Modelo de wake word `Eclipse` propio que pase evaluación.
 - Verificación real del round-trip de DeepSeek con una API key.
-- Verificación real del RAG con un modelo de embeddings (Ollama `nomic-embed-text`).
-- Calendario vía CalDAV (el email por IMAP ya está implementado).
+- Verificación real de reproducción web con `agent-browser` y sesión iniciada.
 - Reply-draft web para Instagram/Messenger (búsqueda y reproducción en YouTube Music ya
   implementadas; falta verificación real con `agent-browser`).
 - Test harness ampliado y threat model.

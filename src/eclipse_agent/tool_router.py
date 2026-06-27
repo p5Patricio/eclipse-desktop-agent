@@ -214,6 +214,13 @@ class NativeMCPClient:
                 risk_level=RiskLevel.LOW,
             ),
             MCPToolDefinition(
+                name="read_agenda",
+                server_name="native",
+                description="Read the user's upcoming calendar agenda (read-only)",
+                action_kinds=(ActionKind.READ_AGENDA,),
+                risk_level=RiskLevel.LOW,
+            ),
+            MCPToolDefinition(
                 name="set_reminder",
                 server_name="native",
                 description="Set a reminder or timer",
@@ -269,6 +276,8 @@ class NativeMCPClient:
             return self._query_documents(arguments)
         if tool.name == "summarize_inbox":
             return self._summarize_inbox(arguments)
+        if tool.name == "read_agenda":
+            return self._read_agenda(arguments)
         if tool.name == "set_reminder":
             return self._set_reminder(arguments)
         if tool.name == "play_media":
@@ -452,6 +461,23 @@ class NativeMCPClient:
         return _native_failure(
             action_type="answer_question",
             target="answer",
+            reason=result.message,
+        )
+
+    def _read_agenda(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.calendar_agenda import read_agenda
+
+        result = read_agenda()
+        if result.success:
+            return _native_success(
+                action_type="read_agenda",
+                target="agenda",
+                message=result.message,
+                extra_facts={"spoken": result.message},
+            )
+        return _native_failure(
+            action_type="read_agenda",
+            target="agenda",
             reason=result.message,
         )
 

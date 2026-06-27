@@ -59,6 +59,9 @@ Extras opcionales:
 :: Lectura de PDFs para Q&A sobre documentos
 .venv\Scripts\python -m pip install -e ".[documents]"
 
+:: Agenda del calendario (parseo de iCal)
+.venv\Scripts\python -m pip install -e ".[calendar]"
+
 :: Automatización web (CLI externa de Node)
 npm install -g agent-browser
 ```
@@ -99,6 +102,10 @@ OPENAI_API_KEY=
 # ECLIPSE_IMAP_HOST=imap.gmail.com
 # ECLIPSE_IMAP_USER=tu-correo@gmail.com
 # ECLIPSE_IMAP_PASSWORD=
+
+# Agenda del calendario (solo lectura). Google Calendar: Configuración → Integrar
+# calendario → "Dirección secreta en formato iCal". También sirve un archivo .ics local.
+# ECLIPSE_CALENDAR_ICS_URL=
 
 # Voz y wake word
 # ECLIPSE_WHISPER_MODEL=small
@@ -195,6 +202,9 @@ eclipse-agent email-list
 eclipse-agent email-summary
 eclipse-agent email-draft --uid 12345 --instruction "agradecé y confirmá"
 
+:: Agenda del calendario (solo lectura; requiere URL secreta iCal — ver Configuración)
+eclipse-agent agenda --days 7
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -247,6 +257,8 @@ daemon always-on
 - **Email (lectura)**: leé y resumí tu bandeja por voz o CLI ("resumime mi bandeja") y
   redactá borradores de respuesta — **nunca envía**. Vía IMAP (stdlib) con una app password;
   estrictamente read-only.
+- **Agenda del calendario**: leé tus próximos eventos por voz o CLI ("qué tengo en mi agenda"),
+  con eventos recurrentes expandidos. Desde la URL secreta iCal (o un .ics local); read-only.
 - **Rutinas proactivas**: agendá acciones recurrentes ("cada mañana a las 8 decime el
   resumen", "cada 10 minutos recordame tomar agua"), diarias o por intervalo, que el daemon
   dispara solo. La acción puede hablar un mensaje fijo o responderlo con el LLM.

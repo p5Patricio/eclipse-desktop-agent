@@ -31,6 +31,7 @@ from eclipse_agent.desktop_control import (
 )
 from eclipse_agent.answer import answer_question_from_env, render_answer_result
 from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
+from eclipse_agent.calendar_agenda import read_agenda, render_agenda_cli
 from eclipse_agent.documents import (
     DocumentStore,
     EmbeddingClient,
@@ -536,6 +537,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     email_draft.add_argument("--uid", required=True, help="Message UID from email-list.")
     email_draft.add_argument("--instruction", default="", help="Guidance for the reply.")
+
+    agenda = subparsers.add_parser(
+        "agenda",
+        help="Read your upcoming calendar agenda from an iCal source (read-only).",
+    )
+    agenda.add_argument("--days", type=int, default=7, help="Horizon in days.")
+    agenda.add_argument("--limit", type=int, default=10, help="Max events to show.")
 
     play_media = subparsers.add_parser(
         "play-media",
@@ -1432,6 +1440,12 @@ def _cmd_email_draft(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_agenda(args: argparse.Namespace) -> int:
+    result = read_agenda(horizon_days=args.days, limit=args.limit)
+    print(render_agenda_cli(result))
+    return 0 if result.success else 1
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
     print(render_answer_result(result))
@@ -1724,6 +1738,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "email-list": _cmd_email_list,
     "email-summary": _cmd_email_summary,
     "email-draft": _cmd_email_draft,
+    "agenda": _cmd_agenda,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

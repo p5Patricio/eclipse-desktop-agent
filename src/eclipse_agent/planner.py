@@ -110,6 +110,7 @@ class ActionKind(StrEnum):
     ANSWER_QUESTION = "answer_question"
     QUERY_DOCUMENTS = "query_documents"
     SUMMARIZE_INBOX = "summarize_inbox"
+    READ_AGENDA = "read_agenda"
     SET_REMINDER = "set_reminder"
     ADD_ROUTINE = "add_routine"
     REMEMBER_FACT = "remember_fact"
@@ -777,6 +778,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if screenshot_action:
         return (screenshot_action,)
 
+    agenda_action = _maybe_read_agenda_action(clause, lowered, start_index)
+    if agenda_action:
+        return (agenda_action,)
+
     inbox_action = _maybe_summarize_inbox_action(clause, lowered, start_index)
     if inbox_action:
         return (inbox_action,)
@@ -1063,6 +1068,32 @@ def _maybe_memory_action(clause: str, lowered: str, index: int) -> PlannedAction
         target=request.key or "memory",
         parameters={"memory_key": request.key},
         tool_name="native.recall_memory",
+    )
+
+
+_AGENDA_TOKENS = (
+    "mi agenda", "mi calendario", "mis eventos", "qué tengo hoy", "qué tengo mañana",
+    "en la agenda", "my agenda", "my calendar", "my schedule", "my events",
+)
+
+
+_AGENDA_OPEN_VERBS = ("abre", "abrir", "abrí", "abri", "open", "lanza", "lanzá", "inicia")
+
+
+def _maybe_read_agenda_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    # "abrí mi calendario" / "open my calendar" means launch the app, not read it.
+    if any(verb in lowered for verb in _AGENDA_OPEN_VERBS):
+        return None
+    if not any(token in lowered for token in _AGENDA_TOKENS):
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.READ_AGENDA,
+        description="Read the user's upcoming calendar agenda.",
+        risk_level=RiskLevel.LOW,
+        target="agenda",
+        parameters={},
+        tool_name="native.read_agenda",
     )
 
 

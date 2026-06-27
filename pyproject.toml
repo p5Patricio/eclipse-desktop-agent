@@ -31,12 +31,18 @@ dependencies = [
 dev = [
   "pytest>=8",
   "ruff>=0.5",
+  "icalendar>=5.0",
+  "recurring-ical-events>=2.0",
 ]
 voice = [
   "faster-whisper>=1.2",
 ]
 documents = [
   "pypdf>=4.0",
+]
+calendar = [
+  "icalendar>=5.0",
+  "recurring-ical-events>=2.0",
 ]
 notifications = [
   "winrt-Windows.UI.Notifications.Management>=2.0",
