@@ -25,7 +25,7 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 |---|---|---|
 | Plataforma | Windows-only (PAL completo) | — |
 | Activación always-on | Wake word local + daemon con pollers de recordatorios y rutinas | Atajo push-to-talk global |
-| Voz STT/TTS | faster-whisper + SAPI funcionando | Modelo de wake word `Eclipse` propio; voz más natural |
+| Voz STT/TTS | faster-whisper + voces WinRT (neural) con fallback SAPI | Modelo de wake word `Eclipse` propio |
 | Planner multi-acción | Híbrido determinista + LLM | Mejores heurísticas para casos ambiguos |
 | Proveedores LLM | ollama / deepseek / openai configurables | Verificar round-trip real de DeepSeek |
 | ToolRouter | Tools nativas + MCP, con safety gates | Scheduler con paralelismo/timeout/cancelación |
@@ -49,7 +49,7 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 ### Endurecimiento
 
 - Panel de permisos y modo privado. (Audit log y kill switch ya implementados.)
-- Atajo global de push-to-talk, voz neural y app de bandeja (tray).
+- Atajo global de push-to-talk y app de bandeja (tray). (Voz neural vía WinRT ya implementada.)
 
 ## Regla de seguridad
 

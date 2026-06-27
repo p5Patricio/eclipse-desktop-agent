@@ -62,6 +62,9 @@ Extras opcionales:
 :: Agenda del calendario (parseo de iCal)
 .venv\Scripts\python -m pip install -e ".[calendar]"
 
+:: Voz neural (voces WinRT de Windows; mejor que SAPI)
+.venv\Scripts\python -m pip install -e ".[neural-voice]"
+
 :: Automatización web (CLI externa de Node)
 npm install -g agent-browser
 ```
@@ -111,6 +114,10 @@ OPENAI_API_KEY=
 # ECLIPSE_WHISPER_MODEL=small
 # ECLIPSE_WAKE_THRESHOLD=0.5
 # ECLIPSE_BUILTIN_WAKEWORD=hey_jarvis
+
+# Voz de salida: ECLIPSE_TTS_NEURAL=0 fuerza SAPI; ECLIPSE_TTS_VOICE elige una voz por nombre
+# ECLIPSE_TTS_NEURAL=1
+# ECLIPSE_TTS_VOICE=
 ```
 
 También podés elegir el proveedor por línea de comandos en cada invocación con
@@ -240,7 +247,10 @@ daemon always-on
 - **Wake word** local con openwakeword (`hey_jarvis` por defecto; soporta un modelo
   `Eclipse` propio entrenable, con fallback seguro mientras no pase evaluación).
 - **Transcripción** local con faster-whisper.
-- **Síntesis de voz** con SAPI de Windows.
+- **Síntesis de voz** con las voces WinRT de Windows (OneCore y voces "Natural"/neurales
+  descargables), con fallback automático a SAPI. Prefiere voces naturales si están
+  instaladas. Para la mejor calidad, descargá una voz natural en Configuración de Windows →
+  Hora e idioma → Voz → Administrar voces.
 - **Notificaciones**: captura, reglas de foco/juego/privado, resúmenes y borradores de
   respuesta, persistidas en SQLite.
 - **Control de escritorio**: lanzar apps, listar ventanas, capturas de pantalla y tipeo

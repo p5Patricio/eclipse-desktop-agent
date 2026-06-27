@@ -44,6 +44,12 @@ calendar = [
   "icalendar>=5.0",
   "recurring-ical-events>=2.0",
 ]
+neural-voice = [
+  "winrt-Windows.Media.SpeechSynthesis>=3.2",
+  "winrt-Windows.Storage.Streams>=3.2",
+  "winrt-Windows.Foundation>=3.2",
+  "winrt-Windows.Foundation.Collections>=3.2",
+]
 notifications = [
   "winrt-Windows.UI.Notifications.Management>=2.0",
 ]

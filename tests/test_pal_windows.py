@@ -260,6 +260,46 @@ def test_windows_tts_provider_speak_error(monkeypatch):
     assert res.success is False
     assert "SAPI error" in res.message
 
+def test_select_neural_voice_prefers_natural():
+    from collections import namedtuple
+    from eclipse_agent.pal.windows.voice import _select_voice
+
+    voice = namedtuple("Voice", "display_name language")
+    voices = [voice("Microsoft Sabina", "es-MX"), voice("Microsoft Dalia (Natural)", "es-MX")]
+
+    assert _select_voice(voices).display_name == "Microsoft Dalia (Natural)"
+    assert _select_voice(voices, voice_name="sabina").display_name == "Microsoft Sabina"
+    assert _select_voice([]) is None
+
+def test_neural_tts_synthesizes_and_plays(monkeypatch):
+    import eclipse_agent.pal.windows.voice as voice_mod
+
+    tts = WindowsTTSProvider(prefer_neural=True)
+    monkeypatch.setattr(tts, "_neural_wav", lambda text: b"RIFFfakewav")
+    played = []
+    monkeypatch.setattr(voice_mod, "_play_wav", lambda data: played.append(data))
+
+    res = tts.speak("Hola", dry_run=False)
+    assert res.success is True
+    assert res.provider == "winrt-neural"
+    assert played == [b"RIFFfakewav"]
+
+def test_neural_tts_falls_back_to_sapi(monkeypatch):
+    import win32com.client
+
+    mock_speaker = MagicMock()
+    monkeypatch.setattr(win32com.client, "Dispatch", MagicMock(return_value=mock_speaker))
+    tts = WindowsTTSProvider(prefer_neural=True)
+
+    def boom(text):
+        raise RuntimeError("no winrt")
+
+    monkeypatch.setattr(tts, "_neural_wav", boom)
+
+    res = tts.speak("Hola", dry_run=False)
+    assert res.provider == "sapi"
+    mock_speaker.Speak.assert_called_once_with("Hola")
+
 def test_windows_audio_recorder_record(tmp_path, monkeypatch):
     import sounddevice as sd
     import soundfile as sf

@@ -56,3 +56,9 @@ def disable_wake_runtime_http_server(monkeypatch):
     from eclipse_agent.wake_runtime import WakeRuntime
     monkeypatch.setattr(WakeRuntime, "_start_status_server", lambda self: None)
 
+
+@pytest.fixture(autouse=True)
+def disable_neural_tts(monkeypatch):
+    # Tests must never produce real audio; the SAPI path is mocked instead.
+    monkeypatch.setenv("ECLIPSE_TTS_NEURAL", "0")
+
