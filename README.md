@@ -205,6 +205,13 @@ eclipse-agent email-draft --uid 12345 --instruction "agradecé y confirmá"
 :: Agenda del calendario (solo lectura; requiere URL secreta iCal — ver Configuración)
 eclipse-agent agenda --days 7
 
+:: Seguridad: kill switch global y log auditable de acciones
+eclipse-agent kill            :: pausa: Eclipse deja de actuar
+eclipse-agent resume          :: reactiva
+eclipse-agent kill-status
+eclipse-agent audit --limit 20
+eclipse-agent audit-clear
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -271,11 +278,15 @@ daemon always-on
   instrucciones complejas.
 - **Seguridad**: draft-first, confirmaciones para acciones sensibles y redacción de
   ventanas sensibles en capturas.
+- **Kill switch + audit log**: pausá Eclipse al instante con un interruptor global (deja de
+  actuar y lo registra), y revisá un log auditable de cada acción (intención, herramienta,
+  riesgo y resultado), en SQLite local.
 
 ## Almacenamiento local
 
 Eclipse guarda su estado bajo `%LOCALAPPDATA%\eclipse-agent\` en bases SQLite
-(notificaciones, telemetría, recordatorios, memoria de hechos, rutinas y documentos).
+(notificaciones, telemetría, recordatorios, memoria de hechos, rutinas, documentos y
+auditoría). El kill switch es un archivo de estado (`killswitch.flag`) en la misma carpeta.
 
 ## Arquitectura
 

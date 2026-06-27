@@ -21,8 +21,10 @@ Eclipse controlará partes reales del escritorio. La seguridad no es un agregado
 - Denylist para apps sensibles: bancos, contraseñas, autenticadores, llaves, wallets.
 - Modo borrador por defecto.
 - Confirmaciones explícitas y visibles.
-- Logs de intención, plan, herramienta, resultado y confirmación.
-- Kill switch global.
+- Logs de intención, plan, herramienta, resultado y confirmación. **Implementado**: el
+  `ToolRouter` audita cada acción; revisá con `audit` / `audit-clear`.
+- Kill switch global. **Implementado**: `kill` / `resume` / `kill-status` (el router no
+  ejecuta nada mientras está activado).
 - `.env` y secretos excluidos de git.
 - Datos locales borrables por el usuario.
 

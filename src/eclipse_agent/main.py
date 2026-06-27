@@ -31,7 +31,9 @@ from eclipse_agent.desktop_control import (
 )
 from eclipse_agent.answer import answer_question_from_env, render_answer_result
 from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
+from eclipse_agent.audit import AuditLog, render_audit_entries
 from eclipse_agent.calendar_agenda import read_agenda, render_agenda_cli
+from eclipse_agent.killswitch import KillSwitch
 from eclipse_agent.documents import (
     DocumentStore,
     EmbeddingClient,
@@ -545,6 +547,15 @@ def build_parser() -> argparse.ArgumentParser:
     agenda.add_argument("--days", type=int, default=7, help="Horizon in days.")
     agenda.add_argument("--limit", type=int, default=10, help="Max events to show.")
 
+    audit = subparsers.add_parser("audit", help="Show recently audited actions.")
+    audit.add_argument("--limit", type=int, default=20, help="How many entries to show.")
+
+    subparsers.add_parser("audit-clear", help="Clear the audit log.")
+
+    subparsers.add_parser("kill", help="Engage the kill switch; Eclipse stops acting.")
+    subparsers.add_parser("resume", help="Disengage the kill switch.")
+    subparsers.add_parser("kill-status", help="Show whether the kill switch is engaged.")
+
     play_media = subparsers.add_parser(
         "play-media",
         help="Open a media search in your default browser (YouTube Music, etc.).",
@@ -1036,7 +1047,9 @@ def _cmd_transcribe_file(args: argparse.Namespace) -> int:
 
 
 def _cmd_wake_command(args: argparse.Namespace) -> int:
-    result = WakeRuntime(store=_notification_store(args)).handle_command(
+    result = WakeRuntime(
+        store=_notification_store(args), router=_build_router(args)
+    ).handle_command(
         args.text,
         speak=args.speak,
         route_execute=args.route_execute,
@@ -1053,6 +1066,7 @@ def _cmd_wake_loop(args: argparse.Namespace) -> int:
             stt=LocalWhisperSTT(model_name=args.model, language=args.language),
         ),
         store=_notification_store(args),
+        router=_build_router(args),
     )
     result = runtime.run(
         wake_phrase=args.wake_phrase,
@@ -1081,6 +1095,7 @@ def _cmd_wake_efficient(args: argparse.Namespace) -> int:
             threshold=args.wake_threshold,
         ),
         store=_notification_store(args),
+        router=_build_router(args),
     )
     runtime.start_reminder_poller(dry_run=not args.execute)
     runtime.start_routine_poller(dry_run=not args.execute)
@@ -1436,6 +1451,34 @@ def _cmd_agenda(args: argparse.Namespace) -> int:
     return 0 if result.success else 1
 
 
+def _cmd_audit(args: argparse.Namespace) -> int:
+    print(render_audit_entries(AuditLog().recent(limit=args.limit)))
+    return 0
+
+
+def _cmd_audit_clear(args: argparse.Namespace) -> int:
+    print(f"Cleared {AuditLog().clear()} audit entries.")
+    return 0
+
+
+def _cmd_kill(args: argparse.Namespace) -> int:
+    KillSwitch().engage()
+    print("Kill switch ENGAGED. Eclipse will not act until you resume.")
+    return 0
+
+
+def _cmd_resume(args: argparse.Namespace) -> int:
+    KillSwitch().disengage()
+    print("Kill switch released. Eclipse can act again.")
+    return 0
+
+
+def _cmd_kill_status(args: argparse.Namespace) -> int:
+    engaged = KillSwitch().is_engaged()
+    print("Kill switch: ENGAGED (Eclipse paused)." if engaged else "Kill switch: off.")
+    return 0
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
     print(render_answer_result(result))
@@ -1729,6 +1772,11 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "email-summary": _cmd_email_summary,
     "email-draft": _cmd_email_draft,
     "agenda": _cmd_agenda,
+    "audit": _cmd_audit,
+    "audit-clear": _cmd_audit_clear,
+    "kill": _cmd_kill,
+    "resume": _cmd_resume,
+    "kill-status": _cmd_kill_status,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,
@@ -1766,9 +1814,16 @@ def _browser_plan_exit_code(status: BrowserActionStatus) -> int:
 def _build_router(args: argparse.Namespace) -> ToolRouter:
     """Build a tool router. Without an MCP config, fall back to native local tools."""
 
+    audit_log = AuditLog()
+    kill_switch = KillSwitch()
     if getattr(args, "mcp_config", None):
-        return ToolRouter.from_config_file(args.mcp_config)
-    return ToolRouter(mcp_client=NativeMCPClient())
+        router = ToolRouter.from_config_file(args.mcp_config)
+        router.audit_log = audit_log
+        router.kill_switch = kill_switch
+        return router
+    return ToolRouter(
+        mcp_client=NativeMCPClient(), audit_log=audit_log, kill_switch=kill_switch
+    )
 
 
 def _load_dotenv() -> None:

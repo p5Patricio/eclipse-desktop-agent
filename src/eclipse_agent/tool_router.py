@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote_plus
 
+from eclipse_agent.audit import AuditEntry, AuditLog
+from eclipse_agent.killswitch import KillSwitch
 from eclipse_agent.pal.factory import PlatformFactory
 from eclipse_agent.planner import (
     ActionKind,
@@ -738,10 +740,14 @@ class ToolRouter:
         mcp_client: MCPClientProtocol | None = None,
         static_tools: tuple[MCPToolDefinition, ...] = (),
         vision_adapter: VisionAdapterProtocol | None = None,
+        audit_log: AuditLog | None = None,
+        kill_switch: KillSwitch | None = None,
     ) -> None:
         self.mcp_client = mcp_client or MCPToolClient()
         self.static_tools = static_tools
         self.vision_adapter = vision_adapter or VisionAdapter()
+        self.audit_log = audit_log
+        self.kill_switch = kill_switch
         self._tool_cache: tuple[MCPToolDefinition, ...] | None = None
 
     @classmethod
@@ -774,6 +780,49 @@ class ToolRouter:
         return tuple(self.route_action(action, context) for action in plan.actions)
 
     def route_action(
+        self,
+        action: PlannedAction,
+        context: ToolExecutionContext,
+    ) -> ToolExecutionResult:
+        """Route one action, honoring the kill switch and auditing the outcome."""
+
+        if self.kill_switch is not None and self.kill_switch.is_engaged():
+            result = ToolExecutionResult(
+                action_id=action.id,
+                tool_name="kill_switch",
+                success=False,
+                executed=False,
+                requires_confirmation=False,
+                message="Eclipse is paused; resume it to act.",
+                metadata={"target": action.target, "kind": action.kind.value},
+            )
+            self._record_audit(action, result, "killed")
+            return result
+
+        result = self._route_action_inner(action, context)
+        self._record_audit(action, result, _audit_status(result))
+        return result
+
+    def _record_audit(
+        self, action: PlannedAction, result: ToolExecutionResult, status: str
+    ) -> None:
+        if self.audit_log is None:
+            return
+        try:
+            self.audit_log.record(
+                AuditEntry(
+                    action_kind=action.kind.value,
+                    target=str(action.target),
+                    risk_level=action.risk_level.value,
+                    status=status,
+                    tool_name=result.tool_name,
+                    detail=str(result.message)[:500],
+                )
+            )
+        except Exception:  # noqa: BLE001 - auditing must never break routing
+            pass
+
+    def _route_action_inner(
         self,
         action: PlannedAction,
         context: ToolExecutionContext,
@@ -967,6 +1016,16 @@ def _resolve_app_alias(value: str) -> str | None:
     normalized = re.sub(r"[\s_-]+", " ", normalized)
     aliases = {app_name: app_name for app_name in _DESKTOP_APP_ALLOWLIST}
     return aliases.get(normalized)
+
+
+def _audit_status(result: ToolExecutionResult) -> str:
+    if result.executed:
+        return "executed"
+    if result.requires_confirmation:
+        return "blocked"
+    if not result.success:
+        return "failed"
+    return "prepared"
 
 
 def _native_success(

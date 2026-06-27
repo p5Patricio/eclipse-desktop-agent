@@ -36,7 +36,7 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 | Agentes de codificación | Prompt contract | Launcher con confirmación y kill switch |
 | Memoria local | SQLite: notificaciones, telemetría, recordatorios, hechos, rutinas, documentos | Permission store y audit log |
 | Q&A de documentos (RAG) | Pipeline embeddings + coseno en SQLite (sin base vectorial) | Verificar con un modelo de embeddings real (Ollama) |
-| Seguridad | Draft-first + confirmaciones + redactor | Kill switch y panel de permisos |
+| Seguridad | Draft-first + confirmaciones + redactor + kill switch + audit log | Panel de permisos |
 | Entorno | venv reproducible (`setup.bat`) + CI en Windows | — |
 
 ## Pendiente
@@ -48,7 +48,7 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 
 ### Endurecimiento
 
-- Panel de permisos, audit log, kill switch, modo privado.
+- Panel de permisos y modo privado. (Audit log y kill switch ya implementados.)
 - Atajo global de push-to-talk, voz neural y app de bandeja (tray).
 
 ## Regla de seguridad

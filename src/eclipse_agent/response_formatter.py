@@ -94,6 +94,11 @@ class ActionResponseFormatter:
         target = _display_target(raw_target)
         action_type = str(facts.get("action_type") or "").strip()
 
+        if result.tool_name == "kill_switch":
+            if language == "en":
+                return "Eclipse is paused. Resume me to act again."
+            return "Eclipse está en pausa. Reactivame para volver a actuar."
+
         if result.success:
             spoken = str(facts.get("spoken") or "").strip()
             if spoken:

@@ -69,6 +69,8 @@ Verification + Response
 | `response_formatter` | Construye la respuesta hablada a partir del resultado de la acción |
 | `pal/` | **Platform Abstraction Layer** de Windows: ventanas, input, captura, lanzador, notificaciones, voz, daemon |
 | `safety/` | Política de riesgo y redacción de capturas |
+| `audit` | Log auditable de cada acción ruteada (SQLite) |
+| `killswitch` | Interruptor global persistido; pausa toda ejecución |
 | `runtime_diagnostics` | Estado de dependencias locales (CLI `diagnostics`) |
 | `telemetry` | Métricas de la capa de planificación (SQLite) |
 
@@ -128,6 +130,9 @@ configurable con `ECLIPSE_EMBED_MODEL` / `ECLIPSE_EMBED_BASE_URL`.
   código, borrado).
 - **Redacción de pantalla**: las ventanas sensibles (bancos, gestores de contraseñas) se
   difuminan antes de analizar una captura.
+- **Kill switch + audit log**: el `ToolRouter` consulta un interruptor global antes de
+  ejecutar cualquier acción (lo pausa todo) y registra cada acción —intención, herramienta,
+  riesgo y resultado— en un log auditable local.
 
 Ver [`SECURITY.md`](SECURITY.md) para el detalle del modelo de seguridad.
 
