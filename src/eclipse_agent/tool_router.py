@@ -541,7 +541,7 @@ class NativeMCPClient:
         )
 
     def _play_media(self, arguments: dict[str, Any]) -> NativeToolResult:
-        from eclipse_agent.media_playback import MediaPlaybackWorkflow
+        from eclipse_agent.media_playback import open_media_search
 
         query = str(arguments.get("query", "") or "").strip()
         app_name = str(arguments.get("app_name", "") or "YouTube Music").strip()
@@ -551,9 +551,7 @@ class NativeMCPClient:
                 target=app_name,
                 reason="Tell me what you want to play.",
             )
-        result = MediaPlaybackWorkflow().play(
-            app_name, query, confirmed=True, dry_run=False
-        )
+        result = open_media_search(app_name, query, dry_run=False)
         if result.success:
             return _native_success(
                 action_type="play_media",
@@ -561,13 +559,10 @@ class NativeMCPClient:
                 message=result.message,
                 extra_facts={"spoken": result.message},
             )
-        reason = result.message
-        if "binary not found" in reason.casefold():
-            reason = "Necesito agent-browser instalado para reproducir música."
         return _native_failure(
             action_type="play_media",
             target=app_name,
-            reason=reason,
+            reason=result.message,
         )
 
     def _add_routine(self, arguments: dict[str, Any]) -> NativeToolResult:

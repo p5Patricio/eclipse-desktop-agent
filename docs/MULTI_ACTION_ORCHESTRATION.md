@@ -37,7 +37,7 @@ Natural-language instruction
 
 | Acción | Ejemplo | Riesgo | Tool |
 |---|---|---:|---|
-| `play_media` | Reproduce una canción en YouTube Music | Bajo | `native.play_media` (search-and-play vía browser adapter) |
+| `play_media` | Reproduce una canción en YouTube Music | Bajo | `native.play_media` (abre la búsqueda en el navegador) |
 | `open_web_app` | Abre YouTube/Instagram/Messenger | Bajo | Browser adapter / agent-browser |
 | `browser_search` | Busca especificaciones en una página | Medio | agent-browser snapshots + refs semánticas |
 | `system_control` | Sube el volumen, pausa, bloquea, batería | Bajo/Medio | `native.system_control` |

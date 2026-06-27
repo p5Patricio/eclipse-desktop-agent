@@ -1,144 +1,86 @@
-import json
+from types import SimpleNamespace
 
 from eclipse_agent import main as main_module
-from eclipse_agent.browser_automation import (
-    BrowserAutomationResult,
-    BrowserCommandKind,
-    BrowserElement,
-    BrowserSnapshot,
-)
-from eclipse_agent.browser_ref_selector import BrowserRefPurpose, select_browser_ref
 from eclipse_agent.media_playback import (
     MediaPlaybackResult,
-    MediaPlaybackWorkflow,
+    build_media_search_url,
+    open_media_search,
+    render_media_playback_result,
 )
 from eclipse_agent.planner import ActionKind, PlannedAction, create_action_plan
 from eclipse_agent.safety import RiskLevel
 from eclipse_agent.tool_router import NativeMCPClient, ToolExecutionContext, ToolRouter
 
 
-def _snapshot_json(refs: dict[str, dict[str, str]]) -> str:
-    return json.dumps({"success": True, "data": {"origin": "music.youtube.com", "refs": refs}})
+class FakeLauncher:
+    def __init__(self, *, success: bool = True, message: str = "opened") -> None:
+        self.success = success
+        self.message = message
+        self.launched: str | None = None
+        self.dry_run: bool | None = None
+
+    def launch(self, target: str, dry_run: bool = True):
+        self.launched = target
+        self.dry_run = dry_run
+        return SimpleNamespace(success=self.success, message=self.message)
 
 
-SEARCH_PAGE = _snapshot_json({"e1": {"role": "searchbox", "name": "Search"}})
-RESULTS_PAGE = _snapshot_json({"e5": {"role": "button", "name": "Play"}})
+# --- url building --------------------------------------------------------
 
 
-class FakeAdapter:
-    """Stand-in for AgentBrowserAdapter that returns canned snapshots."""
-
-    def __init__(self, snapshots: list[str]) -> None:
-        self.snapshots = list(snapshots)
-        self.calls: list[tuple] = []
-
-    def _ok(self, kind: BrowserCommandKind, *, dry_run: bool, stdout: str = "") -> BrowserAutomationResult:
-        return BrowserAutomationResult(
-            success=True,
-            kind=kind,
-            command=(),
-            message="ok",
-            dry_run=dry_run,
-            executed=not dry_run,
-            stdout=stdout,
-        )
-
-    def snapshot(self, url=None, *, dry_run=True):
-        self.calls.append(("snapshot", url))
-        stdout = self.snapshots.pop(0) if self.snapshots else ""
-        return self._ok(BrowserCommandKind.SNAPSHOT, dry_run=dry_run, stdout=stdout)
-
-    def fill(self, selector, text, *, dry_run=True):
-        self.calls.append(("fill", selector, text))
-        return self._ok(BrowserCommandKind.FILL, dry_run=dry_run)
-
-    def press(self, key, *, dry_run=True):
-        self.calls.append(("press", key))
-        return self._ok(BrowserCommandKind.PRESS, dry_run=dry_run)
-
-    def click(self, selector, *, dry_run=True):
-        self.calls.append(("click", selector))
-        return self._ok(BrowserCommandKind.CLICK, dry_run=dry_run)
+def test_build_search_url_for_youtube_music_encodes_query():
+    url = build_media_search_url("YouTube Music", "el lado oscuro")
+    assert url == "https://music.youtube.com/search?q=el+lado+oscuro"
 
 
-# --- ref selection -------------------------------------------------------
+def test_build_search_url_unsupported_app_is_none():
+    assert build_media_search_url("Winamp", "algo") is None
 
 
-def test_media_browser_profile_is_headed(monkeypatch):
-    monkeypatch.setenv("ECLIPSE_CHROME_PROFILE", "MyProfile")
-    from eclipse_agent.media_playback import media_browser_profile
-
-    profile = media_browser_profile()
-    assert profile.headed is True
-    assert profile.chrome_profile == "MyProfile"
+# --- open_media_search ---------------------------------------------------
 
 
-def test_select_play_control_prefers_play_button():
-    snapshot = BrowserSnapshot(
-        origin="x",
-        elements=(
-            BrowserElement(ref="@e1", role="searchbox", name="Search"),
-            BrowserElement(ref="@e2", role="button", name="Play"),
-        ),
-        snapshot_text="",
-    )
-
-    selection = select_browser_ref(snapshot, purpose=BrowserRefPurpose.PLAY_CONTROL)
-    assert selection.selected_ref == "@e2"
-
-
-# --- workflow ------------------------------------------------------------
-
-
-def test_play_full_flow_searches_and_clicks():
-    adapter = FakeAdapter([SEARCH_PAGE, RESULTS_PAGE])
-    workflow = MediaPlaybackWorkflow(adapter=adapter)
-
-    result = workflow.play("YouTube Music", "El lado oscuro", confirmed=True, dry_run=False)
+def test_open_media_search_launches_url():
+    launcher = FakeLauncher()
+    result = open_media_search("YouTube Music", "lofi", launcher=launcher, dry_run=False)
 
     assert result.success is True
-    assert result.executed is True
-    assert "Reproduciendo El lado oscuro" in result.message
-    assert ("fill", "@e1", "El lado oscuro") in adapter.calls
-    assert ("click", "@e5") in adapter.calls
+    assert result.opened is True
+    assert launcher.launched == "https://music.youtube.com/search?q=lofi"
+    assert "lofi" in result.message
 
 
-def test_play_unsupported_app_fails():
-    result = MediaPlaybackWorkflow(adapter=FakeAdapter([])).play("Winamp", "algo")
+def test_open_media_search_dry_run_does_not_open():
+    launcher = FakeLauncher()
+    result = open_media_search("YouTube Music", "lofi", launcher=launcher, dry_run=True)
+
+    assert result.success is True
+    assert result.opened is False
+    assert launcher.dry_run is True
+
+
+def test_open_media_search_empty_query_fails():
+    result = open_media_search("YouTube Music", "   ", launcher=FakeLauncher())
+    assert result.success is False
+
+
+def test_open_media_search_unsupported_app_fails():
+    result = open_media_search("Winamp", "algo", launcher=FakeLauncher())
     assert result.success is False
     assert "supported" in result.message
 
 
-def test_play_empty_query_fails():
-    result = MediaPlaybackWorkflow(adapter=FakeAdapter([SEARCH_PAGE])).play("YouTube Music", "   ")
+def test_open_media_search_launcher_failure_is_graceful():
+    launcher = FakeLauncher(success=False, message="no browser")
+    result = open_media_search("YouTube Music", "lofi", launcher=launcher, dry_run=False)
     assert result.success is False
+    assert "no browser" in result.message
 
 
-def test_play_without_snapshot_only_prepares():
-    # No snapshot output (dry-run reality): can only prepare, not execute.
-    result = MediaPlaybackWorkflow(adapter=FakeAdapter([])).play(
-        "YouTube Music", "algo", dry_run=True
-    )
-    assert result.success is True
-    assert result.executed is False
-    assert "Prepared" in result.message
-
-
-def test_play_blocks_without_confirmation():
-    result = MediaPlaybackWorkflow(adapter=FakeAdapter([SEARCH_PAGE])).play(
-        "YouTube Music", "algo", confirmed=False, dry_run=False
-    )
-    assert result.success is False
-    assert result.blocked is True
-
-
-def test_play_search_box_not_found_fails():
-    no_search = _snapshot_json({"e9": {"role": "button", "name": "Settings"}})
-    result = MediaPlaybackWorkflow(adapter=FakeAdapter([no_search])).play(
-        "YouTube Music", "algo", confirmed=True, dry_run=False
-    )
-    assert result.success is False
-    assert "search box" in result.message
+def test_render_media_playback_result_shows_url():
+    result = MediaPlaybackResult(True, "YouTube Music", "lofi", "https://x/y", "ok", opened=True)
+    rendered = render_media_playback_result(result)
+    assert "https://x/y" in rendered
 
 
 # --- planner -------------------------------------------------------------
@@ -159,17 +101,15 @@ def test_plans_play_media_routes_to_native_play_media():
 def test_native_play_media_speaks_result(monkeypatch):
     import eclipse_agent.media_playback as mp
 
-    class FakeWorkflow:
-        def play(self, app, query, *, confirmed, dry_run):
-            return MediaPlaybackResult(
-                success=True,
-                app_name=app,
-                query=query,
-                executed=True,
-                message=f"Reproduciendo {query} en {app}.",
-            )
-
-    monkeypatch.setattr(mp, "MediaPlaybackWorkflow", lambda: FakeWorkflow())
+    monkeypatch.setattr(
+        mp,
+        "open_media_search",
+        lambda app, query, **kwargs: MediaPlaybackResult(
+            True, app, query, "https://music.youtube.com/search?q=tema",
+            f"Abrí la búsqueda de {query} en {app}. Dale play cuando quieras.",
+            opened=True,
+        ),
+    )
 
     action = PlannedAction(
         id="pm-1",
@@ -186,12 +126,22 @@ def test_native_play_media_speaks_result(monkeypatch):
     )
 
     assert result.success is True
-    assert "Reproduciendo tema" in result.structured_content["user_facts"]["spoken"]
+    assert "Dale play" in result.structured_content["user_facts"]["spoken"]
 
 
 # --- CLI -----------------------------------------------------------------
 
 
-def test_cli_play_media_dry_run_prepares(capsys):
+def test_cli_play_media_dry_run(monkeypatch, capsys):
+    import eclipse_agent.main as main_mod
+
+    monkeypatch.setattr(
+        main_mod,
+        "open_media_search",
+        lambda app, query, **kwargs: MediaPlaybackResult(
+            True, app, query, "https://music.youtube.com/search?q=algo", "ok"
+        ),
+    )
+
     assert main_module.main(["play-media", "--query", "algo"]) == 0
     assert "Media playback" in capsys.readouterr().out

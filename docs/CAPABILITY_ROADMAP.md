@@ -14,7 +14,7 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 | Recordatorios y timers (disparados por el daemon) | ✅ | `remind`, `reminders-list`, `reminders-check` |
 | Memoria persistente de hechos/preferencias | ✅ | `remember`, `memory-list`, `memory-recall`, `memory-forget` |
 | Rutinas proactivas (diarias o por intervalo) | ✅ | `routine-add`, `routines-list`, `routine-remove`, `routines-check` |
-| Reproducir en apps web (YouTube Music) | ✅ orquestación; requiere `agent-browser` + sesión | `play-media` |
+| Reproducir en apps web (abre la búsqueda en tu navegador) | ✅ | `play-media` |
 | Q&A sobre notas/PDFs (RAG) | ✅ pipeline; requiere modelo de embeddings (Ollama) | `docs-add`, `docs-list`, `docs-ask`, `docs-clear` |
 | Email: leer/resumir bandeja + borradores (IMAP, read-only) | ✅ pipeline; requiere app password | `email-list`, `email-summary`, `email-draft` |
 | Agenda del calendario (iCal, read-only, recurrencias) | ✅ pipeline; requiere URL secreta iCal | `agenda` |
@@ -40,11 +40,6 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 | Entorno | venv reproducible (`setup.bat`) + CI en Windows | — |
 
 ## Pendiente
-
-### Verificación pendiente (el código está; falta probar con tu setup)
-
-- **Reproducción web**: instalar `agent-browser` y abrir sesión para probar el flujo de
-  búsqueda y reproducción end-to-end.
 
 ### Control nativo
 

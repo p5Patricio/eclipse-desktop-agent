@@ -50,7 +50,7 @@ from eclipse_agent.email_inbox import (
     summarize_inbox,
 )
 from eclipse_agent.media_playback import (
-    MediaPlaybackWorkflow,
+    open_media_search,
     render_media_playback_result,
 )
 from eclipse_agent.memory import (
@@ -547,23 +547,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     play_media = subparsers.add_parser(
         "play-media",
-        help="Search and play media in a web app like YouTube Music.",
+        help="Open a media search in your default browser (YouTube Music, etc.).",
     )
     play_media.add_argument(
         "--app",
         default="YouTube Music",
-        help="Media web app. Defaults to YouTube Music.",
+        help="Media app. Defaults to YouTube Music.",
     )
     play_media.add_argument("--query", required=True, help="What to play.")
     play_media.add_argument(
-        "--confirmed",
-        action="store_true",
-        help="Required to actually type the search and click play.",
-    )
-    play_media.add_argument(
         "--execute",
         action="store_true",
-        help="Actually run it through agent-browser instead of dry-running.",
+        help="Actually open the browser instead of dry-running.",
     )
 
     reminders_check = subparsers.add_parser(
@@ -1369,12 +1364,7 @@ def _cmd_routines_check(args: argparse.Namespace) -> int:
 
 
 def _cmd_play_media(args: argparse.Namespace) -> int:
-    result = MediaPlaybackWorkflow().play(
-        args.app,
-        args.query,
-        confirmed=args.confirmed,
-        dry_run=not args.execute,
-    )
+    result = open_media_search(args.app, args.query, dry_run=not args.execute)
     print(render_media_playback_result(result))
     return 0 if result.success else 1
 

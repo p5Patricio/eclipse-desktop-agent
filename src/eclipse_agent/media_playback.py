@@ -1,209 +1,81 @@
-"""Search-and-play workflow for web media apps (YouTube Music, etc.).
+"""Media playback for Eclipse: open a search in the user's real browser.
 
-This is the orchestration layer the browser adapter was scaffolded for: it opens
-a media web app, snapshots it, picks the search box, types the query, snapshots
-the results, picks a play control, and clicks it. Each active step is gated and
-only runs when explicitly confirmed and executed; real execution needs
-``agent-browser`` installed and a logged-in session.
-
-The flow reads accessibility snapshots from ``agent-browser`` output, so the
-whole orchestration is deterministic and testable with a fake adapter.
+Rather than driving a media app's hostile SPA through browser automation
+(unreliable: bot detection, headless walls, frequently-changing DOM), Eclipse
+opens the app's search URL in the user's default browser — where they are
+already logged in — and lets them press play. Simple and reliable.
 """
 
 from __future__ import annotations
 
-import json
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from urllib.parse import quote_plus
 
-from eclipse_agent.browser_automation import (
-    AgentBrowserAdapter,
-    BrowserAutomationProfile,
-    BrowserAutomationResult,
-    BrowserSnapshot,
-    parse_agent_browser_snapshot_json,
-)
-from eclipse_agent.browser_ref_selector import (
-    BrowserRefPurpose,
-    select_browser_ref,
-)
+from eclipse_agent.pal.factory import PlatformFactory
 
-MEDIA_WEB_TARGETS = {
-    "YouTube Music": "https://music.youtube.com/",
-    "YouTube": "https://www.youtube.com/",
-    "Spotify": "https://open.spotify.com/",
+MEDIA_SEARCH_URLS = {
+    "YouTube Music": "https://music.youtube.com/search?q={query}",
+    "YouTube": "https://www.youtube.com/results?search_query={query}",
+    "Spotify": "https://open.spotify.com/search/{query}",
 }
 
 
-def media_browser_profile() -> BrowserAutomationProfile:
-    """Browser profile for media playback.
-
-    Media sites (YouTube Music) serve a "get Chrome" wall to headless browsers,
-    so run headed. Set ECLIPSE_CHROME_PROFILE to reuse a logged-in Chrome profile.
-    """
-
-    return BrowserAutomationProfile(
-        headed=True,
-        chrome_profile=os.environ.get("ECLIPSE_CHROME_PROFILE", ""),
-    )
-
-
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True)
 class MediaPlaybackResult:
-    """Result of preparing or running a search-and-play flow."""
+    """Result of opening a media search."""
 
     success: bool
     app_name: str
     query: str
+    url: str
     message: str
-    executed: bool = False
-    blocked: bool = False
-    steps: tuple[BrowserAutomationResult, ...] = field(default_factory=tuple)
+    opened: bool = False
 
 
-class MediaPlaybackWorkflow:
-    """Open a media web app, search for a track, and play the first result."""
+def build_media_search_url(app_name: str, query: str) -> str | None:
+    """Build the app's search URL for a query, or None if unsupported."""
 
-    def __init__(self, adapter: AgentBrowserAdapter | None = None) -> None:
-        self.adapter = adapter or AgentBrowserAdapter(media_browser_profile())
+    template = MEDIA_SEARCH_URLS.get(app_name) or MEDIA_SEARCH_URLS.get(app_name.title())
+    if not template:
+        return None
+    return template.format(query=quote_plus(query))
 
-    def play(
-        self,
-        app_name: str,
-        query: str,
-        *,
-        confirmed: bool = True,
-        dry_run: bool = True,
-    ) -> MediaPlaybackResult:
-        """Run the full open -> search -> play flow with safety gates."""
 
-        url = _resolve_media_url(app_name)
-        if url is None:
-            return MediaPlaybackResult(
-                success=False,
-                app_name=app_name,
-                query=query,
-                message=f"{app_name} is not a supported media web app yet.",
-            )
-        cleaned_query = " ".join(query.split())
-        if not cleaned_query:
-            return MediaPlaybackResult(
-                success=False,
-                app_name=app_name,
-                query=query,
-                message="Tell me what to play.",
-            )
+def open_media_search(
+    app_name: str,
+    query: str,
+    *,
+    launcher: object | None = None,
+    dry_run: bool = True,
+) -> MediaPlaybackResult:
+    """Open the app's search for ``query`` in the default browser."""
 
-        steps: list[BrowserAutomationResult] = []
-        opened = self.adapter.snapshot(url=url, dry_run=dry_run)
-        steps.append(opened)
-        if not opened.success:
-            return _failure(app_name, cleaned_query, steps, opened.message)
-
-        search_page = _parse_snapshot(opened.stdout)
-        if search_page is None:
-            return MediaPlaybackResult(
-                success=True,
-                app_name=app_name,
-                query=cleaned_query,
-                executed=False,
-                message=(
-                    f"Prepared to open {app_name} and search '{cleaned_query}'. "
-                    "Run with --execute and agent-browser installed to play."
-                ),
-                steps=tuple(steps),
-            )
-
-        search_ref = select_browser_ref(
-            search_page, purpose=BrowserRefPurpose.SEARCH_INPUT
-        ).selected_ref
-        if not search_ref:
-            return _failure(
-                app_name, cleaned_query, steps, "Could not find the search box."
-            )
-        if not confirmed:
-            return MediaPlaybackResult(
-                success=False,
-                app_name=app_name,
-                query=cleaned_query,
-                blocked=True,
-                message="Playing media needs confirmation before typing and clicking.",
-                steps=tuple(steps),
-            )
-
-        steps.append(self.adapter.fill(search_ref, cleaned_query, dry_run=dry_run))
-        steps.append(self.adapter.press("Enter", dry_run=dry_run))
-        results = self.adapter.snapshot(dry_run=dry_run)
-        steps.append(results)
-        if not results.success:
-            return _failure(app_name, cleaned_query, steps, results.message)
-
-        results_page = _parse_snapshot(results.stdout)
-        if results_page is None:
-            return _failure(
-                app_name, cleaned_query, steps, "Could not read the search results."
-            )
-
-        play_ref = select_browser_ref(
-            results_page, purpose=BrowserRefPurpose.PLAY_CONTROL
-        ).selected_ref
-        if not play_ref:
-            return _failure(
-                app_name, cleaned_query, steps, "Could not find a play control."
-            )
-
-        clicked = self.adapter.click(play_ref, dry_run=dry_run)
-        steps.append(clicked)
-        if not clicked.success:
-            return _failure(app_name, cleaned_query, steps, clicked.message)
+    cleaned = " ".join(query.split())
+    if not cleaned:
+        return MediaPlaybackResult(False, app_name, query, "", "Tell me what to play.")
+    url = build_media_search_url(app_name, cleaned)
+    if url is None:
         return MediaPlaybackResult(
-            success=True,
-            app_name=app_name,
-            query=cleaned_query,
-            executed=clicked.executed,
-            message=f"Reproduciendo {cleaned_query} en {app_name}.",
-            steps=tuple(steps),
+            False, app_name, cleaned, "", f"{app_name} is not a supported media app yet."
         )
+    launch = launcher or PlatformFactory.get_app_launcher()
+    try:
+        result = launch.launch(url, dry_run=dry_run)  # type: ignore[attr-defined]
+    except Exception as exc:  # noqa: BLE001
+        return MediaPlaybackResult(False, app_name, cleaned, url, str(exc))
+    if not getattr(result, "success", True):
+        return MediaPlaybackResult(
+            False, app_name, cleaned, url, getattr(result, "message", "Could not open the browser.")
+        )
+    spoken = f"Abrí la búsqueda de {cleaned} en {app_name}. Dale play cuando quieras."
+    return MediaPlaybackResult(True, app_name, cleaned, url, spoken, opened=not dry_run)
 
 
 def render_media_playback_result(result: MediaPlaybackResult) -> str:
     """Render a media playback result for CLI output."""
 
-    status = "ok" if result.success else ("blocked" if result.blocked else "failed")
+    status = "ok" if result.success else "failed"
     lines = [f"Media playback [{status}]: {result.message}"]
-    for step in result.steps:
-        marker = "executed" if step.executed else "prepared"
-        if not step.success:
-            marker = "failed"
-        lines.append(f"- {step.kind.value} [{marker}]: {step.message}")
+    if result.url:
+        lines.append(f"url: {result.url}")
     return "\n".join(lines)
-
-
-def _resolve_media_url(app_name: str) -> str | None:
-    if app_name in MEDIA_WEB_TARGETS:
-        return MEDIA_WEB_TARGETS[app_name]
-    return MEDIA_WEB_TARGETS.get(app_name.title())
-
-
-def _parse_snapshot(raw_output: str) -> BrowserSnapshot | None:
-    if not raw_output.strip():
-        return None
-    try:
-        return parse_agent_browser_snapshot_json(raw_output)
-    except (ValueError, json.JSONDecodeError):
-        return None
-
-
-def _failure(
-    app_name: str,
-    query: str,
-    steps: list[BrowserAutomationResult],
-    message: str,
-) -> MediaPlaybackResult:
-    return MediaPlaybackResult(
-        success=False,
-        app_name=app_name,
-        query=query,
-        message=message,
-        steps=tuple(steps),
-    )

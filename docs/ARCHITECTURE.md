@@ -53,7 +53,7 @@ Verification + Response
 | `tool_router` | Convierte `PlannedAction` en tools concretas con gates de seguridad |
 | `browser_automation` | Abre/busca/snapshot en navegador vía `agent-browser` |
 | `browser_ref_selector` | Elige refs semánticos del snapshot de accesibilidad por propósito |
-| `media_playback` | Orquesta abrir → buscar → reproducir en apps web (YouTube Music) |
+| `media_playback` | Abre la búsqueda de una app de música (YouTube Music) en el navegador por defecto |
 | `coding_agents` | Prepara prompts y abre Claude Code / Gemini / Codex |
 | `notifications` | Captura, reglas de foco, resúmenes y borradores (SQLite) |
 | `desktop_control` | Tipos de resultado neutrales para control de escritorio |
