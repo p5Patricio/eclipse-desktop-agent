@@ -40,6 +40,30 @@ def test_executable_command_uses_plain_path_for_real_executable():
     assert _executable_command(resolved, command) == (resolved, *command[1:])
 
 
+def test_base_command_adds_headed_and_profile_when_set():
+    adapter = AgentBrowserAdapter(
+        BrowserAutomationProfile(headed=True, chrome_profile="Default")
+    )
+    command = adapter.build_command(
+        BrowserAutomationRequest(
+            kind=BrowserCommandKind.OPEN_URL, url="https://example.com"
+        )
+    )
+    assert "--headed" in command
+    assert command[command.index("--profile") + 1] == "Default"
+
+
+def test_base_command_omits_headed_and_profile_by_default():
+    adapter = AgentBrowserAdapter(BrowserAutomationProfile())
+    command = adapter.build_command(
+        BrowserAutomationRequest(
+            kind=BrowserCommandKind.OPEN_URL, url="https://example.com"
+        )
+    )
+    assert "--headed" not in command
+    assert "--profile" not in command
+
+
 def test_agent_browser_open_url_builds_allowed_domain_command(tmp_path):
     adapter = AgentBrowserAdapter(
         BrowserAutomationProfile(

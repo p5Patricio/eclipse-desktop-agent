@@ -64,6 +64,15 @@ class FakeAdapter:
 # --- ref selection -------------------------------------------------------
 
 
+def test_media_browser_profile_is_headed(monkeypatch):
+    monkeypatch.setenv("ECLIPSE_CHROME_PROFILE", "MyProfile")
+    from eclipse_agent.media_playback import media_browser_profile
+
+    profile = media_browser_profile()
+    assert profile.headed is True
+    assert profile.chrome_profile == "MyProfile"
+
+
 def test_select_play_control_prefers_play_button():
     snapshot = BrowserSnapshot(
         origin="x",

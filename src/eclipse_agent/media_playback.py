@@ -13,10 +13,12 @@ whole orchestration is deterministic and testable with a fake adapter.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 
 from eclipse_agent.browser_automation import (
     AgentBrowserAdapter,
+    BrowserAutomationProfile,
     BrowserAutomationResult,
     BrowserSnapshot,
     parse_agent_browser_snapshot_json,
@@ -31,6 +33,19 @@ MEDIA_WEB_TARGETS = {
     "YouTube": "https://www.youtube.com/",
     "Spotify": "https://open.spotify.com/",
 }
+
+
+def media_browser_profile() -> BrowserAutomationProfile:
+    """Browser profile for media playback.
+
+    Media sites (YouTube Music) serve a "get Chrome" wall to headless browsers,
+    so run headed. Set ECLIPSE_CHROME_PROFILE to reuse a logged-in Chrome profile.
+    """
+
+    return BrowserAutomationProfile(
+        headed=True,
+        chrome_profile=os.environ.get("ECLIPSE_CHROME_PROFILE", ""),
+    )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -50,7 +65,7 @@ class MediaPlaybackWorkflow:
     """Open a media web app, search for a track, and play the first result."""
 
     def __init__(self, adapter: AgentBrowserAdapter | None = None) -> None:
-        self.adapter = adapter or AgentBrowserAdapter()
+        self.adapter = adapter or AgentBrowserAdapter(media_browser_profile())
 
     def play(
         self,

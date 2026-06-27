@@ -56,6 +56,8 @@ class BrowserAutomationProfile:
     search_url_template: str = DEFAULT_SEARCH_URL
     snapshot_flags: tuple[str, ...] = ("-i", "--json")
     batch_snapshot_flags: tuple[str, ...] = ("-i",)
+    headed: bool = False
+    chrome_profile: str = ""
 
 
 @dataclass(frozen=True)
@@ -380,7 +382,7 @@ class AgentBrowserAdapter:
         return tuple(command)
 
     def _base_command(self, allowed_domains: tuple[str, ...]) -> tuple[str, ...]:
-        return (
+        command = [
             self.profile.binary,
             "--session",
             self.profile.session,
@@ -388,7 +390,12 @@ class AgentBrowserAdapter:
             ",".join(allowed_domains),
             "--action-policy",
             str(self.profile.action_policy),
-        )
+        ]
+        if self.profile.headed:
+            command.append("--headed")
+        if self.profile.chrome_profile:
+            command.extend(("--profile", self.profile.chrome_profile))
+        return tuple(command)
 
     def _snapshot_command_text(self) -> str:
         return " ".join(("snapshot", *self.profile.batch_snapshot_flags))
