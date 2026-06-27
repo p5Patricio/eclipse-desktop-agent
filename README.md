@@ -225,6 +225,9 @@ eclipse-agent audit-clear
 :: App de bandeja: ícono con estado en vivo + pausar/reanudar desde el menú
 eclipse-agent tray
 
+:: Push-to-talk global: activá Eclipse con un atajo, sin la wake word
+eclipse-agent push-to-talk --hotkey ctrl+alt+e --route-execute --speak
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -300,6 +303,9 @@ daemon always-on
 - **App de bandeja**: ícono en la bandeja del sistema con el estado en vivo (reposo,
   escuchando, pensando, hablando, en pausa), leyendo el servidor de estado del daemon. Desde
   el menú podés pausar/reanudar Eclipse o salir.
+- **Push-to-talk global**: activá Eclipse con un atajo de teclado (por defecto `Ctrl+Alt+E`)
+  sin esperar la wake word, vía `RegisterHotKey` de Windows (registra solo esa combinación,
+  no engancha un hook global de teclado).
 
 ## Almacenamiento local
 

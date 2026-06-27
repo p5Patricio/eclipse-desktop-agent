@@ -34,6 +34,7 @@ from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
 from eclipse_agent.audit import AuditLog, render_audit_entries
 from eclipse_agent.calendar_agenda import read_agenda, render_agenda_cli
 from eclipse_agent.killswitch import KillSwitch
+from eclipse_agent.push_to_talk import run_push_to_talk
 from eclipse_agent.tray import run_tray
 from eclipse_agent.documents import (
     DocumentStore,
@@ -558,6 +559,25 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("kill-status", help="Show whether the kill switch is engaged.")
 
     subparsers.add_parser("tray", help="Run a system-tray icon showing Eclipse's status.")
+
+    push_to_talk = subparsers.add_parser(
+        "push-to-talk",
+        help="Trigger Eclipse with a global hotkey instead of the wake word.",
+    )
+    _add_notification_store_arg(push_to_talk)
+    push_to_talk.add_argument(
+        "--hotkey", default="ctrl+alt+e", help="Global hotkey, e.g. ctrl+alt+e."
+    )
+    push_to_talk.add_argument("--command-seconds", type=int, default=5, help="Command clip length.")
+    push_to_talk.add_argument("--model", default="small", help="faster-whisper model name/path.")
+    push_to_talk.add_argument("--language", default="es", help="Transcription language code.")
+    push_to_talk.add_argument("--speak", action="store_true", help="Speak Eclipse's response.")
+    push_to_talk.add_argument(
+        "--route-execute", action="store_true", help="Execute low-risk routed actions."
+    )
+    push_to_talk.add_argument(
+        "--confirmed", action="store_true", help="Treat medium-risk actions as confirmed."
+    )
 
     play_media = subparsers.add_parser(
         "play-media",
@@ -1487,6 +1507,28 @@ def _cmd_tray(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_push_to_talk(args: argparse.Namespace) -> int:
+    runtime = WakeRuntime(
+        listener=ListenOnce(
+            stt=LocalWhisperSTT(model_name=args.model, language=args.language),
+        ),
+        store=_notification_store(args),
+        router=_build_router(args),
+    )
+
+    def on_activate() -> None:
+        result = runtime.listen_and_handle(
+            command_seconds=args.command_seconds,
+            speak=args.speak,
+            route_execute=args.route_execute,
+            confirmed=args.confirmed,
+        )
+        print(render_wake_command_result(result))
+
+    run_push_to_talk(on_activate, hotkey=args.hotkey)
+    return 0
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
     print(render_answer_result(result))
@@ -1786,6 +1828,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "resume": _cmd_resume,
     "kill-status": _cmd_kill_status,
     "tray": _cmd_tray,
+    "push-to-talk": _cmd_push_to_talk,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,

@@ -524,6 +524,46 @@ class WakeRuntime:
         finally:
             self.status = "idle"
 
+    def listen_and_handle(
+        self,
+        *,
+        command_seconds: int = 5,
+        audio_dir: str | Path | None = None,
+        speak: bool = False,
+        route_execute: bool = False,
+        confirmed: bool = False,
+        mark_announced: bool = False,
+    ) -> WakeCommandResult:
+        """Record one command (no wake word), transcribe it, and handle it.
+
+        This is the push-to-talk path: a global hotkey triggers it directly.
+        """
+        base_dir = Path(audio_dir).expanduser() if audio_dir else Path(tempfile.gettempdir())
+        self.status = "listening"
+        listener = self._get_listener()
+        command_listen = listener.run(
+            seconds=command_seconds,
+            audio_path=base_dir / "eclipse-ptt-command.wav",
+            dry_run=False,
+        )
+        if not command_listen.success:
+            self.status = "idle"
+            return WakeCommandResult(
+                success=False,
+                kind="listen-failed",
+                command_text="",
+                message=command_listen.message,
+            )
+        result = self.handle_command(
+            _listen_text(command_listen),
+            speak=speak,
+            route_execute=route_execute,
+            confirmed=confirmed,
+            mark_announced=mark_announced,
+        )
+        self.status = "idle"
+        return result
+
     def handle_command(
         self,
         command_text: str,
