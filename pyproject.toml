@@ -50,6 +50,9 @@ neural-voice = [
   "winrt-Windows.Foundation>=3.2",
   "winrt-Windows.Foundation.Collections>=3.2",
 ]
+tray = [
+  "pystray>=0.19",
+]
 notifications = [
   "winrt-Windows.UI.Notifications.Management>=2.0",
 ]

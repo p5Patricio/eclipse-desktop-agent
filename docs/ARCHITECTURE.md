@@ -71,6 +71,7 @@ Verification + Response
 | `safety/` | Política de riesgo y redacción de capturas |
 | `audit` | Log auditable de cada acción ruteada (SQLite) |
 | `killswitch` | Interruptor global persistido; pausa toda ejecución |
+| `tray` | Ícono de bandeja con estado en vivo (lee el server de `:11438`) y menú pausar/reanudar |
 | `runtime_diagnostics` | Estado de dependencias locales (CLI `diagnostics`) |
 | `telemetry` | Métricas de la capa de planificación (SQLite) |
 

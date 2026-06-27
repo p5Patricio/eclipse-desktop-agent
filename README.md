@@ -65,6 +65,9 @@ Extras opcionales:
 :: Voz neural (voces WinRT de Windows; mejor que SAPI)
 .venv\Scripts\python -m pip install -e ".[neural-voice]"
 
+:: App de bandeja (ícono de estado)
+.venv\Scripts\python -m pip install -e ".[tray]"
+
 :: Automatización web (CLI externa de Node)
 npm install -g agent-browser
 ```
@@ -219,6 +222,9 @@ eclipse-agent kill-status
 eclipse-agent audit --limit 20
 eclipse-agent audit-clear
 
+:: App de bandeja: ícono con estado en vivo + pausar/reanudar desde el menú
+eclipse-agent tray
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -291,6 +297,9 @@ daemon always-on
 - **Kill switch + audit log**: pausá Eclipse al instante con un interruptor global (deja de
   actuar y lo registra), y revisá un log auditable de cada acción (intención, herramienta,
   riesgo y resultado), en SQLite local.
+- **App de bandeja**: ícono en la bandeja del sistema con el estado en vivo (reposo,
+  escuchando, pensando, hablando, en pausa), leyendo el servidor de estado del daemon. Desde
+  el menú podés pausar/reanudar Eclipse o salir.
 
 ## Almacenamiento local
 

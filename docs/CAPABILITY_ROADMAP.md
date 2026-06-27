@@ -49,7 +49,7 @@ Además de abrir apps/webs y manejar notificaciones, Eclipse ya *hace cosas* por
 ### Endurecimiento
 
 - Panel de permisos y modo privado. (Audit log y kill switch ya implementados.)
-- Atajo global de push-to-talk y app de bandeja (tray). (Voz neural vía WinRT ya implementada.)
+- Atajo global de push-to-talk. (Voz neural, app de bandeja y kill switch ya implementados.)
 
 ## Regla de seguridad
 

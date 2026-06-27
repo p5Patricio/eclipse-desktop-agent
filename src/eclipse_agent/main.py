@@ -34,6 +34,7 @@ from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
 from eclipse_agent.audit import AuditLog, render_audit_entries
 from eclipse_agent.calendar_agenda import read_agenda, render_agenda_cli
 from eclipse_agent.killswitch import KillSwitch
+from eclipse_agent.tray import run_tray
 from eclipse_agent.documents import (
     DocumentStore,
     EmbeddingClient,
@@ -555,6 +556,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("kill", help="Engage the kill switch; Eclipse stops acting.")
     subparsers.add_parser("resume", help="Disengage the kill switch.")
     subparsers.add_parser("kill-status", help="Show whether the kill switch is engaged.")
+
+    subparsers.add_parser("tray", help="Run a system-tray icon showing Eclipse's status.")
 
     play_media = subparsers.add_parser(
         "play-media",
@@ -1479,6 +1482,11 @@ def _cmd_kill_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_tray(args: argparse.Namespace) -> int:
+    run_tray()
+    return 0
+
+
 def _cmd_ask(args: argparse.Namespace) -> int:
     result = answer_question_from_env(args.question, provider=getattr(args, "provider", None))
     print(render_answer_result(result))
@@ -1777,6 +1785,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "kill": _cmd_kill,
     "resume": _cmd_resume,
     "kill-status": _cmd_kill_status,
+    "tray": _cmd_tray,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
     "notifications-mute": _cmd_notifications_mute,
