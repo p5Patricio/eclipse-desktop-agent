@@ -62,3 +62,13 @@ def disable_neural_tts(monkeypatch):
     # Tests must never produce real audio; the SAPI path is mocked instead.
     monkeypatch.setenv("ECLIPSE_TTS_NEURAL", "0")
 
+
+@pytest.fixture(autouse=True)
+def hermetic_config(monkeypatch):
+    # Tests must not load the developer's real .env or config.json; they set
+    # whatever environment they need explicitly via monkeypatch.
+    import eclipse_agent.main as main_mod
+
+    monkeypatch.setattr(main_mod, "_load_dotenv", lambda: None)
+    monkeypatch.setattr(main_mod, "_load_settings_to_env", lambda: None)
+
