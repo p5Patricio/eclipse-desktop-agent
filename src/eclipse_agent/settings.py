@@ -42,6 +42,8 @@ class EclipseSettings:
     imap_password: str = ""
     # Calendar (read-only iCal)
     calendar_ics_url: str = ""
+    # Safety: whether the always-on daemon executes low-risk actions automatically
+    auto_execute: bool = False
 
 
 _ENV_MAP: dict[str, str] = {

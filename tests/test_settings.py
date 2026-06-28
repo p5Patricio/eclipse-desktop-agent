@@ -74,6 +74,83 @@ def test_api_test_ollama_unreachable():
     assert result["ok"] is False
 
 
+# --- daemon control + safety ---------------------------------------------
+
+
+class FakeProc:
+    def __init__(self) -> None:
+        self._alive = True
+        self.terminated = False
+
+    def poll(self):
+        return None if self._alive else 0
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self._alive = False
+
+
+def test_daemon_command_respects_auto_execute():
+    from eclipse_agent.settings import EclipseSettings
+    from eclipse_agent.settings_app import daemon_command
+
+    assert "--route-execute" in daemon_command(EclipseSettings(auto_execute=True))
+    no_auto = daemon_command(EclipseSettings(auto_execute=False))
+    assert "--route-execute" not in no_auto
+    assert "wake-efficient" in no_auto
+
+
+def test_start_stop_daemon(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    procs: list[FakeProc] = []
+
+    def spawn(_cmd):
+        proc = FakeProc()
+        procs.append(proc)
+        return proc
+
+    api = SettingsApi(spawn=spawn)
+    assert api.daemon_status()["running"] is False
+
+    assert api.start_daemon()["ok"] is True
+    assert api.daemon_status()["running"] is True
+    assert api.start_daemon()["ok"] is False  # already running
+
+    assert api.stop_daemon()["ok"] is True
+    assert procs[0].terminated is True
+    assert api.daemon_status()["running"] is False
+
+
+def test_kill_switch_via_api(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    api = SettingsApi()
+
+    assert api.kill_switch_state()["engaged"] is False
+    assert api.set_kill_switch(True)["engaged"] is True
+    assert api.kill_switch_state()["engaged"] is True
+    assert api.set_kill_switch(False)["engaged"] is False
+
+
+def test_recent_audit_via_api(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    from eclipse_agent.audit import AuditEntry
+
+    api = SettingsApi()
+    api._audit_log.record(
+        AuditEntry(
+            action_kind="system_control",
+            target="battery",
+            risk_level="low",
+            status="executed",
+            tool_name="native.system_control",
+        )
+    )
+
+    rows = api.recent_audit()
+    assert rows[0]["action_kind"] == "system_control"
+    assert rows[0]["status"] == "executed"
+
+
 # --- CLI -----------------------------------------------------------------
 
 

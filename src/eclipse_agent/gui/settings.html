@@ -57,6 +57,20 @@
     display: flex; align-items: center; justify-content: space-between;
   }
   #save-status { font-size: 13px; }
+  .control-row { display: flex; align-items: center; gap: 11px; margin-bottom: 8px; }
+  .spacer { flex: 1; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #5a5a5a; flex: none; }
+  #status-text { font-weight: 600; }
+  h3 { font-size: 13px; color: var(--muted); margin: 16px 0 8px; font-weight: 600; }
+  .audit { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .audit-row {
+    display: flex; gap: 10px; padding: 7px 11px; font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .audit-row:last-child { border-bottom: none; }
+  .audit-row .tag { font-weight: 600; min-width: 64px; }
+  .audit-row .muted { color: var(--muted); }
+  .audit-empty { padding: 12px; color: var(--muted); font-size: 12px; }
 </style>
 </head>
 <body>
@@ -66,6 +80,22 @@
 </header>
 
 <main>
+  <section class="card">
+    <h2>Estado y control</h2>
+    <p class="hint">Arrancá o pará el asistente always-on y pausalo al instante.</p>
+    <div class="control-row">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">—</span>
+      <span class="spacer"></span>
+      <button onclick="startDaemon()">Iniciar Eclipse</button>
+      <button class="ghost" onclick="stopDaemon()">Detener</button>
+    </div>
+    <div class="inline">
+      <button class="ghost" onclick="toggleKill()">Pausar / reanudar (kill switch)</button>
+      <span id="kill-status" class="status"></span>
+    </div>
+  </section>
+
   <section class="card">
     <h2>Inteligencia (modelo de IA)</h2>
     <p class="hint">El cerebro de Eclipse. Local con Ollama, o en la nube con DeepSeek/OpenAI.</p>
@@ -165,6 +195,17 @@
       </div>
     </div>
   </section>
+
+  <section class="card">
+    <h2>Seguridad y permisos</h2>
+    <p class="hint">Qué puede hacer Eclipse, y el registro auditable de lo que hizo.</p>
+    <div class="field full row-check">
+      <input id="auto_execute" type="checkbox">
+      <label for="auto_execute" style="font-size:13px;color:var(--text)">Ejecutar acciones de bajo riesgo automáticamente (si no, solo prepara borradores)</label>
+    </div>
+    <h3>Últimas acciones</h3>
+    <div class="audit" id="audit-list"><div class="audit-empty">—</div></div>
+  </section>
 </main>
 
 <footer>
@@ -175,7 +216,51 @@
 <script>
   const FIELDS = ["llm_provider","llm_model","llm_base_url","deepseek_api_key","openai_api_key",
     "embed_model","vision_model","tts_neural","tts_voice","whisper_model","wake_threshold",
-    "builtin_wakeword","imap_host","imap_user","imap_password","calendar_ics_url"];
+    "builtin_wakeword","imap_host","imap_user","imap_password","calendar_ics_url","auto_execute"];
+
+  const STATUS_COLORS = { idle:"#7878a0", listening:"#2ecc71", thinking:"#f1c40f",
+    speaking:"#3498db", paused:"#e74c3c", offline:"#5a5a5a" };
+  const STATUS_TEXT = { idle:"En reposo", listening:"Escuchando", thinking:"Pensando",
+    speaking:"Hablando", paused:"En pausa", offline:"Detenido" };
+
+  async function refreshStatus() {
+    const st = await window.pywebview.api.daemon_status();
+    const ks = await window.pywebview.api.kill_switch_state();
+    const state = ks.engaged ? "paused" : (st.running ? (st.status || "idle") : "offline");
+    document.getElementById("status-dot").style.background = STATUS_COLORS[state] || "#5a5a5a";
+    document.getElementById("status-text").textContent = STATUS_TEXT[state] || state;
+    document.getElementById("kill-status").textContent = ks.engaged ? "En pausa" : "Activo";
+    document.getElementById("kill-status").className = "status " + (ks.engaged ? "err" : "ok");
+  }
+
+  async function startDaemon() {
+    const res = await window.pywebview.api.start_daemon();
+    flash("save-status", res.message, res.ok); refreshStatus();
+  }
+  async function stopDaemon() {
+    const res = await window.pywebview.api.stop_daemon();
+    flash("save-status", res.message, res.ok); refreshStatus();
+  }
+  async function toggleKill() {
+    const ks = await window.pywebview.api.kill_switch_state();
+    await window.pywebview.api.set_kill_switch(!ks.engaged);
+    refreshStatus();
+  }
+  async function loadAudit() {
+    const rows = await window.pywebview.api.recent_audit(15);
+    const box = document.getElementById("audit-list");
+    if (!rows.length) { box.innerHTML = '<div class="audit-empty">Todavía no hay acciones registradas.</div>'; return; }
+    box.innerHTML = rows.map(r => {
+      const t = (r.timestamp || "").slice(11, 19);
+      return `<div class="audit-row"><span class="tag">${r.status}</span>` +
+        `<span>${r.action_kind} → ${r.target}</span>` +
+        `<span class="spacer"></span><span class="muted">${r.risk_level} · ${t}</span></div>`;
+    }).join("");
+  }
+  function flash(id, msg, ok) {
+    const el = document.getElementById(id);
+    el.textContent = msg; el.className = "status " + (ok ? "ok" : "err");
+  }
 
   async function load() {
     const s = await window.pywebview.api.get_settings();
@@ -187,6 +272,9 @@
     }
     await loadVoices(s.tts_voice);
     testOllama();
+    refreshStatus();
+    loadAudit();
+    setInterval(() => { refreshStatus(); loadAudit(); }, 2500);
   }
 
   function collect() {

@@ -313,8 +313,9 @@ daemon always-on
   sin esperar la wake word, vía `RegisterHotKey` de Windows (registra solo esa combinación,
   no engancha un hook global de teclado).
 - **App de configuración de escritorio**: una ventana (pywebview) para ajustar el modelo de
-  IA, la voz, y las credenciales de email/calendario sin tocar archivos. Guarda en
-  `config.json` local y Eclipse lo aplica al arrancar.
+  IA, la voz y las credenciales sin tocar archivos, **arrancar/parar** el asistente, pausarlo
+  con el kill switch y ver el **registro auditable** de acciones — todo desde la ventana.
+  Guarda en `config.json` local y Eclipse lo aplica al arrancar.
 
 ## Almacenamiento local
 
