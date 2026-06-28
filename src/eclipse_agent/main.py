@@ -35,6 +35,8 @@ from eclipse_agent.audit import AuditLog, render_audit_entries
 from eclipse_agent.calendar_agenda import read_agenda, render_agenda_cli
 from eclipse_agent.killswitch import KillSwitch
 from eclipse_agent.push_to_talk import run_push_to_talk
+from eclipse_agent.settings import apply_to_env, default_settings_path, load_settings
+from eclipse_agent.settings_app import run_settings_app
 from eclipse_agent.tray import run_tray
 from eclipse_agent.documents import (
     DocumentStore,
@@ -559,6 +561,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("kill-status", help="Show whether the kill switch is engaged.")
 
     subparsers.add_parser("tray", help="Run a system-tray icon showing Eclipse's status.")
+    subparsers.add_parser("settings", help="Open the Eclipse desktop settings app.")
 
     push_to_talk = subparsers.add_parser(
         "push-to-talk",
@@ -1507,6 +1510,11 @@ def _cmd_tray(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_settings(args: argparse.Namespace) -> int:
+    run_settings_app()
+    return 0
+
+
 def _cmd_push_to_talk(args: argparse.Namespace) -> int:
     runtime = WakeRuntime(
         listener=ListenOnce(
@@ -1828,6 +1836,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "resume": _cmd_resume,
     "kill-status": _cmd_kill_status,
     "tray": _cmd_tray,
+    "settings": _cmd_settings,
     "push-to-talk": _cmd_push_to_talk,
     "notifications-ingest": _cmd_notifications_ingest,
     "notifications-mode": _cmd_notifications_mode,
@@ -1848,9 +1857,18 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
 }
 
 
+def _load_settings_to_env() -> None:
+    """Apply saved settings (config.json from the desktop app) to the environment."""
+
+    path = default_settings_path()
+    if path.exists():
+        apply_to_env(load_settings(path))
+
+
 def main(argv: list[str] | None = None) -> int:
     _ensure_utf8_output()
     _load_dotenv()
+    _load_settings_to_env()
     args = build_parser().parse_args(argv)
     handler = _COMMAND_HANDLERS.get(args.command)
     if handler is None:

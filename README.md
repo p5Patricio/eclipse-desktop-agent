@@ -68,6 +68,9 @@ Extras opcionales:
 :: App de bandeja (ícono de estado)
 .venv\Scripts\python -m pip install -e ".[tray]"
 
+:: App de configuración de escritorio (GUI)
+.venv\Scripts\python -m pip install -e ".[gui]"
+
 :: Automatización web (CLI externa de Node)
 npm install -g agent-browser
 ```
@@ -228,6 +231,9 @@ eclipse-agent tray
 :: Push-to-talk global: activá Eclipse con un atajo, sin la wake word
 eclipse-agent push-to-talk --hotkey ctrl+alt+e --route-execute --speak
 
+:: App de configuración de escritorio (ajustar modelo de IA, voz, credenciales)
+eclipse-agent settings
+
 :: Notificaciones
 eclipse-agent notifications-mode --mode game --minutes 60
 eclipse-agent notifications-summary --mark-announced
@@ -306,6 +312,9 @@ daemon always-on
 - **Push-to-talk global**: activá Eclipse con un atajo de teclado (por defecto `Ctrl+Alt+E`)
   sin esperar la wake word, vía `RegisterHotKey` de Windows (registra solo esa combinación,
   no engancha un hook global de teclado).
+- **App de configuración de escritorio**: una ventana (pywebview) para ajustar el modelo de
+  IA, la voz, y las credenciales de email/calendario sin tocar archivos. Guarda en
+  `config.json` local y Eclipse lo aplica al arrancar.
 
 ## Almacenamiento local
 

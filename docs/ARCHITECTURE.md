@@ -73,6 +73,8 @@ Verification + Response
 | `killswitch` | Interruptor global persistido; pausa toda ejecución |
 | `tray` | Ícono de bandeja con estado en vivo (lee el server de `:11438`) y menú pausar/reanudar |
 | `push_to_talk` | Atajo global (Win32 `RegisterHotKey`) para activar sin la wake word |
+| `settings` | Modelo de configuración persistido en `config.json` + puente a variables de entorno |
+| `settings_app` | App de escritorio de configuración (pywebview): API + frontend en `gui/` |
 | `runtime_diagnostics` | Estado de dependencias locales (CLI `diagnostics`) |
 | `telemetry` | Métricas de la capa de planificación (SQLite) |
 

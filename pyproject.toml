@@ -53,6 +53,9 @@ neural-voice = [
 tray = [
   "pystray>=0.19",
 ]
+gui = [
+  "pywebview>=5.0",
+]
 notifications = [
   "winrt-Windows.UI.Notifications.Management>=2.0",
 ]
@@ -79,6 +82,9 @@ wakeword-training = [
 
 [project.scripts]
 eclipse-agent = "eclipse_agent.main:main"
+
+[tool.setuptools.package-data]
+"eclipse_agent.gui" = ["*.html"]
 
 [tool.ruff]
 line-length = 100
