@@ -35,7 +35,13 @@ from eclipse_agent.audit import AuditLog, render_audit_entries
 from eclipse_agent.calendar_agenda import read_agenda, render_agenda_cli
 from eclipse_agent.killswitch import KillSwitch
 from eclipse_agent.push_to_talk import run_push_to_talk
-from eclipse_agent.settings import apply_to_env, default_settings_path, load_settings
+from eclipse_agent.settings import (
+    apply_to_env,
+    default_mcp_config_path,
+    default_settings_path,
+    load_mcp_servers,
+    load_settings,
+)
 from eclipse_agent.settings_app import run_settings_app
 from eclipse_agent.tray import run_tray
 from eclipse_agent.documents import (
@@ -116,9 +122,12 @@ from eclipse_agent.resources import estimate_resource_profile
 from eclipse_agent.runtime_diagnostics import collect_runtime_diagnostics
 from eclipse_agent.telemetry import ExecutionTelemetryStore, render_telemetry_summary
 from eclipse_agent.tool_router import (
+    CompositeMCPClient,
+    MCPToolClient,
     NativeMCPClient,
     ToolExecutionContext,
     ToolRouter,
+    load_mcp_server_configs,
     render_tool_results,
 )
 from eclipse_agent.voice import ListenOnce, LocalWhisperSTT, OpenWakeWordTrigger, SystemTTS
@@ -1882,15 +1891,20 @@ def _browser_plan_exit_code(status: BrowserActionStatus) -> int:
 
 
 def _build_router(args: argparse.Namespace) -> ToolRouter:
-    """Build a tool router. Without an MCP config, fall back to native local tools."""
+    """Build a tool router: native tools, plus any configured MCP servers."""
 
     audit_log = AuditLog()
     kill_switch = KillSwitch()
-    if getattr(args, "mcp_config", None):
-        router = ToolRouter.from_config_file(args.mcp_config)
-        router.audit_log = audit_log
-        router.kill_switch = kill_switch
-        return router
+    mcp_config = getattr(args, "mcp_config", None)
+    if not mcp_config and load_mcp_servers(default_mcp_config_path()):
+        mcp_config = str(default_mcp_config_path())
+    if mcp_config:
+        configs = load_mcp_server_configs(mcp_config)
+        if configs:
+            client = CompositeMCPClient(NativeMCPClient(), MCPToolClient(configs))
+            return ToolRouter(
+                mcp_client=client, audit_log=audit_log, kill_switch=kill_switch
+            )
     return ToolRouter(
         mcp_client=NativeMCPClient(), audit_log=audit_log, kill_switch=kill_switch
     )

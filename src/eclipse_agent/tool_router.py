@@ -731,6 +731,31 @@ class MCPToolClient:
         raise ValueError(f"No MCP server is configured for {server_name!r}.")
 
 
+class CompositeMCPClient:
+    """Expose native tools and external MCP servers through one client.
+
+    Native tools (``server_name == "native"``) always work; a failing MCP server
+    never takes them down. ``call_tool`` routes to the owner of the tool.
+    """
+
+    def __init__(self, native: MCPClientProtocol, mcp: MCPClientProtocol) -> None:
+        self.native = native
+        self.mcp = mcp
+
+    def discover_tools(self) -> tuple[MCPToolDefinition, ...]:
+        native_tools = self.native.discover_tools()
+        try:
+            mcp_tools = self.mcp.discover_tools()
+        except Exception:  # noqa: BLE001 - a broken MCP server must not hide native tools
+            mcp_tools = ()
+        return (*native_tools, *mcp_tools)
+
+    def call_tool(self, tool: MCPToolDefinition, arguments: dict[str, Any]) -> object:
+        if tool.server_name == "native":
+            return self.native.call_tool(tool, arguments)
+        return self.mcp.call_tool(tool, arguments)
+
+
 class ToolRouter:
     """Map planned actions to discovered MCP tools with safety gates."""
 

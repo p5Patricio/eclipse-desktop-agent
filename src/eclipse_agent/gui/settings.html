@@ -71,6 +71,8 @@
   .audit-row .tag { font-weight: 600; min-width: 64px; }
   .audit-row .muted { color: var(--muted); }
   .audit-empty { padding: 12px; color: var(--muted); font-size: 12px; }
+  .mcp-row { display: grid; grid-template-columns: 1fr 1fr 1.4fr auto; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .mcp-row button { padding: 8px 12px; }
 </style>
 </head>
 <body>
@@ -197,6 +199,17 @@
   </section>
 
   <section class="card">
+    <h2>Conexiones MCP</h2>
+    <p class="hint">Servidores MCP externos que amplían lo que Eclipse puede hacer. Las tools nativas siguen funcionando igual.</p>
+    <div id="mcp-list"></div>
+    <div class="inline">
+      <button class="ghost" onclick="addMcpRow()">+ Agregar servidor</button>
+      <button class="ghost" onclick="saveMcp()">Guardar MCP</button>
+      <span id="mcp-status" class="status"></span>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>Seguridad y permisos</h2>
     <p class="hint">Qué puede hacer Eclipse, y el registro auditable de lo que hizo.</p>
     <div class="field full row-check">
@@ -262,6 +275,28 @@
     el.textContent = msg; el.className = "status " + (ok ? "ok" : "err");
   }
 
+  let mcpServers = [];
+  function esc(v) { return String(v ?? "").replace(/"/g, "&quot;"); }
+  async function loadMcp() {
+    try { mcpServers = await window.pywebview.api.list_mcp_servers(); } catch (e) { mcpServers = []; }
+    renderMcp();
+  }
+  function renderMcp() {
+    const box = document.getElementById("mcp-list");
+    if (!mcpServers.length) { box.innerHTML = '<div class="audit-empty">Sin servidores MCP. Agregá uno.</div>'; return; }
+    box.innerHTML = mcpServers.map((s, i) => `<div class="mcp-row">` +
+      `<input placeholder="nombre" value="${esc(s.name)}" oninput="mcpServers[${i}].name=this.value">` +
+      `<input placeholder="comando" value="${esc(s.command)}" oninput="mcpServers[${i}].command=this.value">` +
+      `<input placeholder="args (separados por espacio)" value="${esc((s.args||[]).join(' '))}" oninput="mcpServers[${i}].args=this.value.split(' ').filter(Boolean)">` +
+      `<button class="ghost" onclick="removeMcp(${i})">✕</button></div>`).join("");
+  }
+  function addMcpRow() { mcpServers.push({ name: "", command: "", args: [] }); renderMcp(); }
+  function removeMcp(i) { mcpServers.splice(i, 1); renderMcp(); }
+  async function saveMcp() {
+    const res = await window.pywebview.api.save_mcp_servers(mcpServers);
+    flash("mcp-status", res.message, res.ok);
+  }
+
   async function load() {
     const s = await window.pywebview.api.get_settings();
     for (const f of FIELDS) {
@@ -274,6 +309,7 @@
     testOllama();
     refreshStatus();
     loadAudit();
+    loadMcp();
     setInterval(() => { refreshStatus(); loadAudit(); }, 2500);
   }
 

@@ -127,6 +127,46 @@ def apply_to_env(settings: EclipseSettings, env: dict | None = None) -> None:
 
 
 def default_settings_path() -> Path:
+    return _config_dir() / "config.json"
+
+
+def default_mcp_config_path() -> Path:
+    return _config_dir() / "mcp-servers.json"
+
+
+def load_mcp_servers(path: str | Path | None = None) -> list[dict]:
+    """Load configured MCP servers as a list of {name, command, args}."""
+
+    resolved = Path(path).expanduser() if path else default_mcp_config_path()
+    if not resolved.exists():
+        return []
+    try:
+        data = json.loads(resolved.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return []
+    servers = data.get("servers", []) if isinstance(data, dict) else []
+    return [s for s in servers if isinstance(s, dict)]
+
+
+def save_mcp_servers(servers: list[dict], path: str | Path | None = None) -> Path:
+    """Persist MCP servers, keeping only entries with a name and command."""
+
+    resolved = Path(path).expanduser() if path else default_mcp_config_path()
+    cleaned = [
+        {
+            "name": str(server["name"]).strip(),
+            "command": str(server["command"]).strip(),
+            "args": list(server.get("args", []) or []),
+        }
+        for server in servers
+        if str(server.get("name", "")).strip() and str(server.get("command", "")).strip()
+    ]
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    resolved.write_text(json.dumps({"servers": cleaned}, indent=2), encoding="utf-8")
+    return resolved
+
+
+def _config_dir() -> Path:
     base = os.environ.get("LOCALAPPDATA")
     root = Path(base) if base else Path.home() / "AppData" / "Local"
-    return root / "eclipse-agent" / "config.json"
+    return root / "eclipse-agent"

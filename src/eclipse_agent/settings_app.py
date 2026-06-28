@@ -20,7 +20,9 @@ from eclipse_agent.audit import AuditLog
 from eclipse_agent.killswitch import KillSwitch
 from eclipse_agent.settings import (
     EclipseSettings,
+    load_mcp_servers,
     load_settings,
+    save_mcp_servers,
     save_settings,
     settings_from_dict,
 )
@@ -130,6 +132,18 @@ class SettingsApi:
             }
             for entry in self._audit_log.recent(limit=limit)
         ]
+
+    # --- MCP servers ---
+
+    def list_mcp_servers(self) -> list[dict]:
+        return load_mcp_servers()
+
+    def save_mcp_servers(self, servers: list[dict]) -> dict:
+        try:
+            path = save_mcp_servers(servers)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "message": f"No se pudo guardar: {exc}"}
+        return {"ok": True, "message": f"Servidores MCP guardados ({path.name})."}
 
     def list_tts_voices(self) -> list[str]:
         try:

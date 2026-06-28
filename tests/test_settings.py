@@ -151,6 +151,44 @@ def test_recent_audit_via_api(monkeypatch, tmp_path):
     assert rows[0]["status"] == "executed"
 
 
+# --- MCP servers ---------------------------------------------------------
+
+
+def test_mcp_servers_roundtrip_and_validation(tmp_path):
+    from eclipse_agent.settings import load_mcp_servers, save_mcp_servers
+
+    path = tmp_path / "mcp.json"
+    save_mcp_servers(
+        [
+            {"name": "browser", "command": "python", "args": ["server.py"]},
+            {"name": "", "command": "x"},  # dropped: no name
+            {"name": "y", "command": ""},  # dropped: no command
+        ],
+        path,
+    )
+    servers = load_mcp_servers(path)
+
+    assert len(servers) == 1
+    assert servers[0]["name"] == "browser"
+    assert servers[0]["args"] == ["server.py"]
+
+
+def test_load_mcp_servers_missing_returns_empty(tmp_path):
+    from eclipse_agent.settings import load_mcp_servers
+
+    assert load_mcp_servers(tmp_path / "nope.json") == []
+
+
+def test_api_mcp_roundtrip(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    api = SettingsApi()
+
+    assert api.list_mcp_servers() == []
+    result = api.save_mcp_servers([{"name": "browser", "command": "python", "args": []}])
+    assert result["ok"] is True
+    assert api.list_mcp_servers()[0]["name"] == "browser"
+
+
 # --- CLI -----------------------------------------------------------------
 
 

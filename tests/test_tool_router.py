@@ -10,12 +10,49 @@ from eclipse_agent.planner import (
 )
 from eclipse_agent.safety import RiskLevel
 from eclipse_agent.tool_router import (
+    CompositeMCPClient,
     MCPToolDefinition,
     NativeMCPClient,
     ToolExecutionContext,
     ToolRouter,
     load_mcp_server_configs,
 )
+
+
+class _FakeClient:
+    def __init__(self, server_name: str, *, fail: bool = False) -> None:
+        self.server_name = server_name
+        self.fail = fail
+
+    def discover_tools(self):
+        if self.fail:
+            raise RuntimeError("server down")
+        return (
+            MCPToolDefinition(
+                name="tool", server_name=self.server_name, description="d", risk_level=RiskLevel.LOW
+            ),
+        )
+
+    def call_tool(self, tool, arguments):
+        return {"from": self.server_name}
+
+
+def test_composite_merges_and_routes_by_owner():
+    composite = CompositeMCPClient(_FakeClient("native"), _FakeClient("browser"))
+    tools = composite.discover_tools()
+
+    assert {tool.server_name for tool in tools} == {"native", "browser"}
+
+    native_tool = next(t for t in tools if t.server_name == "native")
+    mcp_tool = next(t for t in tools if t.server_name == "browser")
+    assert composite.call_tool(native_tool, {})["from"] == "native"
+    assert composite.call_tool(mcp_tool, {})["from"] == "browser"
+
+
+def test_composite_survives_broken_mcp_server():
+    composite = CompositeMCPClient(_FakeClient("native"), _FakeClient("browser", fail=True))
+    tools = composite.discover_tools()
+    assert [t.server_name for t in tools] == ["native"]
 
 
 @dataclass
