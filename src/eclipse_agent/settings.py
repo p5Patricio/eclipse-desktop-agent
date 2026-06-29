@@ -44,6 +44,21 @@ class EclipseSettings:
     calendar_ics_url: str = ""
     # Safety: whether the always-on daemon executes low-risk actions automatically
     auto_execute: bool = False
+    # Weather (Open-Meteo, no API key required)
+    weather_lat: float = 0.0
+    weather_lon: float = 0.0
+    # SMTP (email sending)
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    # Morning briefing
+    briefing_enabled: bool = False
+    briefing_time: str = "07:00"
+    # Telegram bot
+    telegram_bot_token: str = ""
+    telegram_allowed_chats: str = ""  # comma-separated chat IDs
 
 
 _ENV_MAP: dict[str, str] = {
@@ -64,6 +79,17 @@ _ENV_MAP: dict[str, str] = {
     "imap_user": "ECLIPSE_IMAP_USER",
     "imap_password": "ECLIPSE_IMAP_PASSWORD",
     "calendar_ics_url": "ECLIPSE_CALENDAR_ICS_URL",
+    "weather_lat": "ECLIPSE_WEATHER_LAT",
+    "weather_lon": "ECLIPSE_WEATHER_LON",
+    "smtp_host": "ECLIPSE_SMTP_HOST",
+    "smtp_port": "ECLIPSE_SMTP_PORT",
+    "smtp_user": "ECLIPSE_SMTP_USER",
+    "smtp_password": "ECLIPSE_SMTP_PASSWORD",
+    "smtp_use_tls": "ECLIPSE_SMTP_USE_TLS",
+    "briefing_enabled": "ECLIPSE_BRIEFING_ENABLED",
+    "briefing_time": "ECLIPSE_BRIEFING_TIME",
+    "telegram_bot_token": "ECLIPSE_TELEGRAM_BOT_TOKEN",
+    "telegram_allowed_chats": "ECLIPSE_TELEGRAM_ALLOWED_CHATS",
 }
 
 
@@ -80,6 +106,11 @@ def settings_from_dict(data: dict) -> EclipseSettings:
         raw = data[name]
         if isinstance(current, bool):
             values[name] = bool(raw)
+        elif isinstance(current, int):
+            try:
+                values[name] = int(raw)
+            except (TypeError, ValueError):
+                values[name] = current
         elif isinstance(current, float):
             try:
                 values[name] = float(raw)

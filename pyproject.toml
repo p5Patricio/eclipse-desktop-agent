@@ -59,6 +59,9 @@ gui = [
 notifications = [
   "winrt-Windows.UI.Notifications.Management>=2.0",
 ]
+telegram = [
+  "python-telegram-bot>=20.0",
+]
 wakeword-training = [
   "acoustics>=0.2.6",
   "audiomentations>=0.33,<0.44",
