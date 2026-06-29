@@ -32,10 +32,18 @@ GUI_DIR = Path(__file__).parent / "gui"
 
 
 def daemon_command(settings: EclipseSettings) -> list[str]:
-    """Build the always-on daemon command from settings."""
+    """Build the always-on daemon command from settings.
 
+    Frozen (PyInstaller) builds dispatch subcommands through the executable
+    itself; from source we go through ``python -m eclipse_agent``.
+    """
+
+    if getattr(sys, "frozen", False):
+        launcher = [sys.executable]
+    else:
+        launcher = [sys.executable, "-m", "eclipse_agent"]
     command = [
-        sys.executable, "-m", "eclipse_agent", "wake-efficient",
+        *launcher, "wake-efficient",
         "--iterations", "0", "--execute", "--speak", "--confirmed",
         "--builtin-wakeword", settings.builtin_wakeword or "hey_jarvis",
         "--model", settings.whisper_model or "small",

@@ -100,6 +100,18 @@ def test_daemon_command_respects_auto_execute():
     assert "wake-efficient" in no_auto
 
 
+def test_daemon_command_frozen_drops_module_flag(monkeypatch):
+    import sys
+
+    from eclipse_agent.settings import EclipseSettings
+    from eclipse_agent.settings_app import daemon_command
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    command = daemon_command(EclipseSettings())
+    assert "-m" not in command
+    assert "wake-efficient" in command
+
+
 def test_start_stop_daemon(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     procs: list[FakeProc] = []

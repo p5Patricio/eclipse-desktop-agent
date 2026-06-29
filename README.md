@@ -338,6 +338,24 @@ provider-agnostic** y un **router de herramientas** con gates de seguridad. Ver
 .venv\Scripts\python -m ruff check src tests   :: lint
 ```
 
+## Empaquetado e instalador
+
+Para distribuir Eclipse como una app de Windows con instalador (sin que el
+usuario instale Python):
+
+```bat
+:: 1. Ejecutable parado solo (PyInstaller)
+.venv\Scripts\python -m pip install pyinstaller
+scripts\build_exe.bat
+:: -> dist\eclipse-agent\eclipse-agent.exe
+
+:: 2. Instalador de Windows (Inno Setup): página de licencia + opciones + accesos directos
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\eclipse-setup.iss
+:: -> dist\installer\eclipse-setup-0.1.0.exe
+```
+
+Detalle en [`packaging/README.md`](packaging/README.md).
+
 ## Licencia
 
 MIT. Ver [`LICENSE`](LICENSE).
