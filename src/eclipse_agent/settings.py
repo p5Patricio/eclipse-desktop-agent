@@ -53,9 +53,12 @@ class EclipseSettings:
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_use_tls: bool = True
+    # Morning briefing
+    briefing_enabled: bool = False
+    briefing_time: str = "07:00"
     # Telegram bot
-    telegram_token: str = ""
-    telegram_allowed_chat_ids: str = ""
+    telegram_bot_token: str = ""
+    telegram_allowed_chats: str = ""  # comma-separated chat IDs
 
 
 _ENV_MAP: dict[str, str] = {
@@ -83,8 +86,10 @@ _ENV_MAP: dict[str, str] = {
     "smtp_user": "ECLIPSE_SMTP_USER",
     "smtp_password": "ECLIPSE_SMTP_PASSWORD",
     "smtp_use_tls": "ECLIPSE_SMTP_USE_TLS",
-    "telegram_token": "ECLIPSE_TELEGRAM_TOKEN",
-    "telegram_allowed_chat_ids": "ECLIPSE_TELEGRAM_ALLOWED_CHAT_IDS",
+    "briefing_enabled": "ECLIPSE_BRIEFING_ENABLED",
+    "briefing_time": "ECLIPSE_BRIEFING_TIME",
+    "telegram_bot_token": "ECLIPSE_TELEGRAM_BOT_TOKEN",
+    "telegram_allowed_chats": "ECLIPSE_TELEGRAM_ALLOWED_CHATS",
 }
 
 
