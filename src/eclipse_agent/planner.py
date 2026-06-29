@@ -746,6 +746,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if reminder_action:
         return (reminder_action,)
 
+    send_email_action = _maybe_send_email_action(clause, lowered, start_index)
+    if send_email_action:
+        return (send_email_action,)
+
     system_action = _maybe_system_control_action(clause, lowered, start_index)
     if system_action:
         return (system_action,)
@@ -778,9 +782,17 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     if search_action:
         return (search_action,)
 
+    screen_ask_action = _maybe_screen_ask_action(clause, lowered, start_index)
+    if screen_ask_action:
+        return (screen_ask_action,)
+
     screenshot_action = _maybe_screenshot_action(clause, lowered, start_index)
     if screenshot_action:
         return (screenshot_action,)
+
+    morning_briefing_action = _maybe_morning_briefing_action(clause, lowered, start_index)
+    if morning_briefing_action:
+        return (morning_briefing_action,)
 
     agenda_action = _maybe_read_agenda_action(clause, lowered, start_index)
     if agenda_action:
@@ -793,6 +805,10 @@ def _plan_clause(clause: str, start_index: int) -> tuple[PlannedAction, ...]:
     documents_action = _maybe_query_documents_action(clause, lowered, start_index)
     if documents_action:
         return (documents_action,)
+
+    weather_action = _maybe_weather_query_action(clause, lowered, start_index)
+    if weather_action:
+        return (weather_action,)
 
     answer_action = _maybe_answer_question_action(clause, lowered, start_index)
     if answer_action:
@@ -949,10 +965,6 @@ def _maybe_screenshot_action(clause: str, lowered: str, index: int) -> PlannedAc
             "screenshot",
             "screen shot",
             "captura",
-            "pantalla",
-            "what is on my screen",
-            "what's on my screen",
-            "look at my screen",
         )
     ):
         return None
@@ -1047,6 +1059,98 @@ def _maybe_set_reminder_action(clause: str, lowered: str, index: int) -> Planned
         target="reminder",
         parameters={"reminder_text": request.text, "delay_seconds": request.delay_seconds},
         tool_name="native.set_reminder",
+    )
+
+
+_SEND_EMAIL_TOKENS = (
+    "send email", "send an email", "enviar correo", "enviar email",
+    "mandar correo", "manda un email", "mandar un mail", "mandá un email",
+    "write email to", "mandar mail",
+)
+
+_SCREEN_ASK_TOKENS = (
+    "what's on my screen", "what is on my screen", "analyze my screen",
+    "look at my screen", "describe the screen", "qué hay en mi pantalla",
+    "mirá mi pantalla", "analizá la pantalla", "qué dice la pantalla",
+    "qué dice mi pantalla", "qué ves", "analiza la pantalla",
+    "pantalla", "screen",
+)
+
+_SCREEN_ASK_REQUIRED = (
+    "what's on my screen", "what is on my screen", "analyze my screen",
+    "look at my screen", "describe the screen", "qué hay en mi pantalla",
+    "mirá mi pantalla", "analizá la pantalla", "qué dice la pantalla",
+    "qué dice mi pantalla", "qué ves", "analiza la pantalla",
+)
+
+_MORNING_BRIEFING_TOKENS = (
+    "good morning", "buenos días", "buenos dias", "buen día", "buen dia",
+    "morning briefing", "resumen de la mañana", "resumen de la manana",
+    "mi resumen del día", "mi resumen del dia", "briefing",
+)
+
+_WEATHER_TOKENS = (
+    "weather", "tiempo", "temperatura", "forecast", "pronóstico", "pronostico",
+    "lluvia", "llueve", "va a llover", "how hot", "how cold",
+    "is it going to rain", "hace calor", "hace frio", "hace frío",
+)
+
+
+def _maybe_send_email_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(token in lowered for token in _SEND_EMAIL_TOKENS):
+        return None
+    to_match = re.search(r"\bto\s+(\S+@\S+)", lowered)
+    to_addr = to_match.group(1) if to_match else ""
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.SEND_EMAIL,
+        description="Send an email after explicit user confirmation.",
+        risk_level=RiskLevel.HIGH,
+        target="email",
+        parameters={"to": to_addr, "subject": "", "body": ""},
+        tool_name="native.send_email",
+    )
+
+
+def _maybe_screen_ask_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(token in lowered for token in _SCREEN_ASK_REQUIRED):
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.SCREEN_ASK,
+        description="Capture the screen and analyze it with the vision model.",
+        risk_level=RiskLevel.MEDIUM,
+        target="screen",
+        parameters={"vision_prompt": clause},
+        tool_name="native.screen_ask",
+    )
+
+
+def _maybe_morning_briefing_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(token in lowered for token in _MORNING_BRIEFING_TOKENS):
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.MORNING_BRIEFING,
+        description="Compose and speak the morning briefing.",
+        risk_level=RiskLevel.LOW,
+        target="briefing",
+        parameters={},
+        tool_name="native.morning_briefing",
+    )
+
+
+def _maybe_weather_query_action(clause: str, lowered: str, index: int) -> PlannedAction | None:
+    if not any(token in lowered for token in _WEATHER_TOKENS):
+        return None
+    return PlannedAction(
+        id=f"action-{index}",
+        kind=ActionKind.WEATHER_QUERY,
+        description="Fetch the current weather conditions.",
+        risk_level=RiskLevel.LOW,
+        target="weather",
+        parameters={},
+        tool_name="native.weather_query",
     )
 
 

@@ -30,6 +30,10 @@ from eclipse_agent.desktop_control import (
     render_desktop_control_result,
 )
 from eclipse_agent.answer import answer_question_from_env, render_answer_result
+from eclipse_agent.screen_ask import ask_about_screen, render_screen_ask_result
+from eclipse_agent.morning_briefing import BriefingConfig, compose_briefing, render_briefing
+from eclipse_agent.weather import WeatherConfig, get_weather, render_weather
+from eclipse_agent.email_sender import EmailSender, SmtpConfigError
 from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
 from eclipse_agent.audit import AuditLog, render_audit_entries
 from eclipse_agent.calendar_agenda import read_agenda, render_agenda_cli
@@ -937,6 +941,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional constraint to include. Can be repeated.",
     )
 
+    screen_ask = subparsers.add_parser(
+        "screen-ask",
+        help="Capture the screen and ask the vision model about it.",
+    )
+    screen_ask.add_argument("question", nargs="?", default="", help="Question about the screen.")
+    screen_ask.add_argument("--window", default=None, help="Optional window title to capture.")
+
+    weather_cmd = subparsers.add_parser(
+        "weather",
+        help="Fetch and display current weather conditions.",
+    )
+    weather_cmd.add_argument("--format", choices=("brief", "full"), default="brief")
+    weather_cmd.add_argument("--lat", type=float, default=None, help="Latitude override.")
+    weather_cmd.add_argument("--lon", type=float, default=None, help="Longitude override.")
+
+    subparsers.add_parser(
+        "briefing",
+        help="Compose and display the morning briefing.",
+    )
+
+    send_email_cmd = subparsers.add_parser(
+        "send-email",
+        help="Send an email via SMTP. Requires --confirmed to actually send.",
+    )
+    send_email_cmd.add_argument("--to", required=True, help="Recipient address.")
+    send_email_cmd.add_argument("--subject", required=True, help="Email subject.")
+    send_email_cmd.add_argument("--body", required=True, help="Email body (plain text).")
+    send_email_cmd.add_argument(
+        "--confirmed",
+        action="store_true",
+        help="Actually send the email. Without this flag, a preview is shown.",
+    )
+
     return parser
 
 
@@ -1800,6 +1837,51 @@ def _cmd_coding_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_screen_ask(args: argparse.Namespace) -> int:
+    question = getattr(args, "question", "") or ""
+    window = getattr(args, "window", None)
+    result = ask_about_screen(question, window)
+    print(render_screen_ask_result(result))
+    return 0 if result.success else 1
+
+
+def _cmd_weather(args: argparse.Namespace) -> int:
+    import os
+
+    lat = getattr(args, "lat", None)
+    lon = getattr(args, "lon", None)
+    if lat is None:
+        lat = float(os.environ.get("ECLIPSE_WEATHER_LAT") or 0.0)
+    if lon is None:
+        lon = float(os.environ.get("ECLIPSE_WEATHER_LON") or 0.0)
+    config = WeatherConfig(latitude=lat, longitude=lon)
+    result = get_weather(config)
+    print(render_weather(result))
+    return 0 if result.success else 1
+
+
+def _cmd_briefing(args: argparse.Namespace) -> int:
+    result = compose_briefing(BriefingConfig())
+    print(render_briefing(result))
+    return 0 if result.success else 1
+
+
+def _cmd_send_email(args: argparse.Namespace) -> int:
+    if not args.confirmed:
+        print(f"Preview — To: {args.to}")
+        print(f"Subject: {args.subject}")
+        print(f"Body: {args.body}")
+        print("Add --confirmed to actually send.")
+        return 0
+    try:
+        EmailSender().send(to=args.to, subject=args.subject, body=args.body)
+        print(f"Email sent to {args.to}.")
+        return 0
+    except SmtpConfigError as exc:
+        print(f"Send failed: {exc}")
+        return 1
+
+
 _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "resource-plan": _cmd_resource_plan,
     "diagnostics": _cmd_diagnostics,
@@ -1863,6 +1945,10 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "browser-snapshot": _cmd_browser_snapshot,
     "browser-action": _cmd_browser_action,
     "coding-prompt": _cmd_coding_prompt,
+    "screen-ask": _cmd_screen_ask,
+    "weather": _cmd_weather,
+    "briefing": _cmd_briefing,
+    "send-email": _cmd_send_email,
 }
 
 

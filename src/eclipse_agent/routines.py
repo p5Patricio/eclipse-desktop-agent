@@ -291,6 +291,7 @@ def fire_due_routines(
     speak: Callable[[str], object],
     *,
     answer: Callable[[str], str] | None = None,
+    briefing_resolver: Callable[[object], str | None] | None = None,
     now: datetime | None = None,
 ) -> tuple[Routine, ...]:
     """Run each due routine, speak its output, and reschedule it.
@@ -302,6 +303,16 @@ def fire_due_routines(
     moment = now or _utc_now()
     fired: list[Routine] = []
     for routine in store.due(moment):
+        if briefing_resolver is not None:
+            resolved = briefing_resolver(routine)
+            if resolved is not None:
+                speak(resolved)
+                next_run = compute_next_run(
+                    routine.schedule_kind, routine.schedule_value, now=moment
+                )
+                store.mark_ran(routine.name, next_run)
+                fired.append(routine)
+                continue
         speak(_routine_spoken(routine, answer))
         next_run = compute_next_run(
             routine.schedule_kind, routine.schedule_value, now=moment

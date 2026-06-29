@@ -178,11 +178,12 @@ def test_desktop_app_launch_ambiguous_spanish_targets_are_unknown():
     assert action.target == "unknown"
     assert "Slack o terminal" in action.parameters["clause"]
 
-def test_screen_question_plans_screenshot_action():
+def test_screen_question_plans_screen_ask_action():
+    # "What is on my screen?" is a question about screen content → SCREEN_ASK (not bare SCREENSHOT)
     plan = create_action_plan("What is on my screen?")
 
-    assert plan.actions[0].kind is ActionKind.SCREENSHOT
-    assert plan.actions[0].tool_name == "native.capture_screenshot"
+    assert plan.actions[0].kind is ActionKind.SCREEN_ASK
+    assert plan.actions[0].tool_name == "native.screen_ask"
     assert "vision_prompt" in plan.actions[0].parameters
 
 

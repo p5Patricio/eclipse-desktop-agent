@@ -257,6 +257,34 @@ class NativeMCPClient:
                 action_kinds=(ActionKind.RECALL_MEMORY,),
                 risk_level=RiskLevel.LOW,
             ),
+            MCPToolDefinition(
+                name="screen_ask",
+                server_name="native",
+                description="Capture the screen and analyze it with the vision model",
+                action_kinds=(ActionKind.SCREEN_ASK,),
+                risk_level=RiskLevel.MEDIUM,
+            ),
+            MCPToolDefinition(
+                name="weather_query",
+                server_name="native",
+                description="Fetch current weather conditions from Open-Meteo",
+                action_kinds=(ActionKind.WEATHER_QUERY,),
+                risk_level=RiskLevel.LOW,
+            ),
+            MCPToolDefinition(
+                name="morning_briefing",
+                server_name="native",
+                description="Compose and speak the morning briefing",
+                action_kinds=(ActionKind.MORNING_BRIEFING,),
+                risk_level=RiskLevel.LOW,
+            ),
+            MCPToolDefinition(
+                name="send_email",
+                server_name="native",
+                description="Send an email via SMTP (requires confirmation)",
+                action_kinds=(ActionKind.SEND_EMAIL,),
+                risk_level=RiskLevel.HIGH,
+            ),
         )
 
     def call_tool(self, tool: MCPToolDefinition, arguments: dict[str, Any]) -> NativeToolResult:
@@ -290,6 +318,14 @@ class NativeMCPClient:
             return self._remember_fact(arguments)
         if tool.name == "recall_memory":
             return self._recall_memory(arguments)
+        if tool.name == "screen_ask":
+            return self._screen_ask(arguments)
+        if tool.name == "weather_query":
+            return self._weather_query(arguments)
+        if tool.name == "morning_briefing":
+            return self._morning_briefing(arguments)
+        if tool.name == "send_email":
+            return self._send_email(arguments)
         return NativeToolResult(isError=True, _message=f"Unknown native tool: {tool.name}")
 
     def _open_url(self, arguments: dict[str, Any]) -> NativeToolResult:
@@ -646,6 +682,116 @@ class NativeMCPClient:
             message=spoken,
             extra_facts={"spoken": spoken},
         )
+
+    def _screen_ask(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.screen_ask import ask_about_screen
+
+        prompt = str(arguments.get("vision_prompt", "") or arguments.get("prompt", "")).strip()
+        window_title = str(arguments.get("window_title", "") or "").strip() or None
+        result = ask_about_screen(prompt or None, window_title)  # type: ignore[arg-type]
+        if result.success:
+            return _native_success(
+                action_type="screen_ask",
+                target="screen",
+                message=result.answer,
+                extra_facts={"spoken": result.answer},
+            )
+        return _native_failure(
+            action_type="screen_ask",
+            target="screen",
+            reason=result.error,
+        )
+
+    def _weather_query(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.weather import WeatherConfig, get_weather, render_weather
+
+        try:
+            import os
+            lat = float(arguments.get("latitude") or os.environ.get("ECLIPSE_WEATHER_LAT") or 0.0)
+            lon = float(arguments.get("longitude") or os.environ.get("ECLIPSE_WEATHER_LON") or 0.0)
+        except (TypeError, ValueError):
+            lat, lon = 0.0, 0.0
+
+        config = WeatherConfig(latitude=lat, longitude=lon)
+        result = get_weather(config)
+        spoken = render_weather(result)
+        if result.success:
+            return _native_success(
+                action_type="weather_query",
+                target="weather",
+                message=spoken,
+                extra_facts={"spoken": spoken},
+            )
+        return _native_failure(
+            action_type="weather_query",
+            target="weather",
+            reason=result.error,
+        )
+
+    def _morning_briefing(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.morning_briefing import BriefingConfig, compose_briefing, render_briefing
+
+        config = BriefingConfig()
+        result = compose_briefing(config)
+        spoken = render_briefing(result)
+        if result.success:
+            return _native_success(
+                action_type="morning_briefing",
+                target="briefing",
+                message=spoken,
+                extra_facts={"spoken": spoken},
+            )
+        return _native_failure(
+            action_type="morning_briefing",
+            target="briefing",
+            reason=result.error,
+        )
+
+    def _send_email(self, arguments: dict[str, Any]) -> NativeToolResult:
+        from eclipse_agent.email_sender import EmailSender, SmtpConfigError
+
+        to = str(arguments.get("to", "") or "").strip()
+        subject = str(arguments.get("subject", "") or "").strip()
+        body = str(arguments.get("body", "") or "").strip()
+        confirmed = bool(arguments.get("confirmed", False))
+
+        if not confirmed:
+            preview = f"Preview: To={to}, Subject={subject}"
+            return _native_success(
+                action_type="send_email",
+                target=to or "email",
+                message=preview,
+                extra_facts={"spoken": "Email ready to send. Confirm to proceed."},
+            )
+
+        if not to:
+            return _native_failure(
+                action_type="send_email",
+                target="email",
+                reason="Recipient address is required.",
+            )
+
+        try:
+            EmailSender().send(to=to, subject=subject, body=body)
+            spoken = f"Email sent to {to}."
+            return _native_success(
+                action_type="send_email",
+                target=to,
+                message=spoken,
+                extra_facts={"spoken": spoken},
+            )
+        except SmtpConfigError as exc:
+            return _native_failure(
+                action_type="send_email",
+                target=to,
+                reason=str(exc),
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _native_failure(
+                action_type="send_email",
+                target=to,
+                reason=f"Failed to send email: {exc}",
+            )
 
     @staticmethod
     def _resolve_url(target: str) -> str:
