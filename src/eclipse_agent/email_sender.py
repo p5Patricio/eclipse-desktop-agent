@@ -122,6 +122,11 @@ def send(
     except smtplib.SMTPException as exc:
         safe_msg = _redact(smtp_password, str(exc))
         raise SmtpConfigError(f"SMTP error sending to {to}: {safe_msg}") from exc
+    except (OSError, TimeoutError) as exc:
+        # OSError/TimeoutError are not SMTPException subclasses but can carry server
+        # banners that may echo credentials — always redact before surfacing.
+        safe_msg = _redact(smtp_password, str(exc))
+        raise SmtpConfigError(f"Connection error sending to {to}: {safe_msg}") from exc
 
 
 class EmailSender:
