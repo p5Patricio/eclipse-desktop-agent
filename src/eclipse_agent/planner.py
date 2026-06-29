@@ -115,6 +115,10 @@ class ActionKind(StrEnum):
     ADD_ROUTINE = "add_routine"
     REMEMBER_FACT = "remember_fact"
     RECALL_MEMORY = "recall_memory"
+    WEATHER_QUERY = "weather_query"
+    SCREEN_ASK = "screen_ask"
+    MORNING_BRIEFING = "morning_briefing"
+    SEND_EMAIL = "send_email"
     UNKNOWN = "unknown"
 
 
