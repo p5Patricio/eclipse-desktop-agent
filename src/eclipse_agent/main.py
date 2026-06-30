@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tempfile
 from collections.abc import Callable
@@ -39,6 +40,11 @@ from eclipse_agent.audit import AuditLog, render_audit_entries
 from eclipse_agent.calendar_agenda import read_agenda, render_agenda_cli
 from eclipse_agent.killswitch import KillSwitch
 from eclipse_agent.push_to_talk import run_push_to_talk
+from eclipse_agent.telegram_bot import (
+    TelegramBotConfig,
+    parse_allowed_chat_ids,
+    run_telegram_bot,
+)
 from eclipse_agent.settings import (
     apply_to_env,
     default_mcp_config_path,
@@ -974,6 +980,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Actually send the email. Without this flag, a preview is shown.",
     )
 
+    telegram_bot = subparsers.add_parser(
+        "telegram-bot",
+        help="Run the Telegram bot remote-control adapter.",
+    )
+    _add_notification_store_arg(telegram_bot)
+    telegram_bot.add_argument(
+        "--token",
+        help="Telegram bot token. Defaults to ECLIPSE_TELEGRAM_BOT_TOKEN.",
+    )
+    telegram_bot.add_argument(
+        "--allowed-chats",
+        help="Comma-separated chat IDs. Defaults to ECLIPSE_TELEGRAM_ALLOWED_CHATS.",
+    )
+
     return parser
 
 
@@ -1171,6 +1191,15 @@ def _cmd_wake_efficient(args: argparse.Namespace) -> int:
     )
     runtime.start_reminder_poller(dry_run=not args.execute)
     runtime.start_routine_poller(dry_run=not args.execute)
+    telegram_token = os.environ.get("ECLIPSE_TELEGRAM_BOT_TOKEN", "").strip()
+    telegram_chats = os.environ.get("ECLIPSE_TELEGRAM_ALLOWED_CHATS", "").strip()
+    if telegram_token and telegram_chats:
+        runtime.start_telegram_bot(
+            TelegramBotConfig(
+                token=telegram_token,
+                allowed_chat_ids=parse_allowed_chat_ids(telegram_chats),
+            )
+        )
     result = runtime.run_efficient(
         iterations=args.iterations,
         command_seconds=args.command_seconds,
@@ -1882,6 +1911,23 @@ def _cmd_send_email(args: argparse.Namespace) -> int:
         return 1
 
 
+def _cmd_telegram_bot(args: argparse.Namespace) -> int:
+    token = (args.token or os.environ.get("ECLIPSE_TELEGRAM_BOT_TOKEN", "")).strip()
+    allowed_chats_raw = (
+        args.allowed_chats or os.environ.get("ECLIPSE_TELEGRAM_ALLOWED_CHATS", "")
+    ).strip()
+    try:
+        config = TelegramBotConfig(
+            token=token,
+            allowed_chat_ids=parse_allowed_chat_ids(allowed_chats_raw),
+        )
+        runtime = WakeRuntime(store=_notification_store(args), router=_build_router(args))
+        run_telegram_bot(config, runtime, kill_switch=KillSwitch())
+    except (RuntimeError, ValueError) as exc:
+        print(f"Telegram bot failed: {exc}")
+        return 1
+    return 0
+
 _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "resource-plan": _cmd_resource_plan,
     "diagnostics": _cmd_diagnostics,
@@ -1949,6 +1995,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {
     "weather": _cmd_weather,
     "briefing": _cmd_briefing,
     "send-email": _cmd_send_email,
+    "telegram-bot": _cmd_telegram_bot,
 }
 
 

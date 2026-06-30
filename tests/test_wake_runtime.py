@@ -425,3 +425,26 @@ def test_confirmation_loop_confirm_without_pending(tmp_path):
 
 
 
+def test_start_telegram_bot_passes_router_kill_switch(monkeypatch):
+    from eclipse_agent.telegram_bot import TelegramBotConfig
+
+    calls = []
+
+    class RouterWithKillSwitch:
+        kill_switch = object()
+
+    def fake_start(config, runtime, *, kill_switch=None):
+        calls.append((config, runtime, kill_switch))
+        return "thread"
+
+    monkeypatch.setattr(
+        "eclipse_agent.telegram_bot.start_telegram_bot_thread",
+        fake_start,
+    )
+    runtime = WakeRuntime(router=RouterWithKillSwitch())
+    config = TelegramBotConfig(token="token", allowed_chat_ids=frozenset({1}))
+
+    runtime.start_telegram_bot(config)
+
+    assert calls == [(config, runtime, runtime.router.kill_switch)]
+    assert runtime._telegram_thread == "thread"

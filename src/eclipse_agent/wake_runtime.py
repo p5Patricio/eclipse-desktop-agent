@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from eclipse_agent.notification_intents import (
     NotificationVoiceIntentKind,
@@ -34,6 +35,9 @@ from eclipse_agent.tool_router import (
     ToolExecutionResult,
     ToolRouter,
 )
+if TYPE_CHECKING:
+    from eclipse_agent.telegram_bot import TelegramBotConfig
+
 from eclipse_agent.voice import (
     ListenOnce,
     ListenResult,
@@ -163,6 +167,7 @@ class WakeRuntime:
         self._reminder_stop = None
         self._routine_thread = None
         self._routine_stop = None
+        self._telegram_thread = None
         try:
             self._start_status_server()
         except OSError:
@@ -264,6 +269,16 @@ class WakeRuntime:
             except Exception:
                 pass
             self._routine_thread = None
+
+    def start_telegram_bot(self, config: TelegramBotConfig) -> None:
+        """Start the Telegram bot thread for remote commands."""
+        from eclipse_agent.telegram_bot import start_telegram_bot_thread
+
+        self._telegram_thread = start_telegram_bot_thread(
+            config,
+            self,
+            kill_switch=getattr(self.router, "kill_switch", None),
+        )
 
 
     def run(
@@ -586,7 +601,10 @@ class WakeRuntime:
             )
 
         clean_cmd = normalized_command.lower().rstrip(".,!?¿¡")
-        if clean_cmd in ("sí", "yes", "confirmar", "dale", "ok", "claro") and self.pending_command is not None:
+        if (
+            clean_cmd in ("sí", "yes", "confirmar", "dale", "ok", "claro")
+            and self.pending_command is not None
+        ):
             cmd = self.pending_command
             self.pending_command = None
             return self.handle_command(
