@@ -199,6 +199,77 @@
   </section>
 
   <section class="card">
+    <h2>Clima</h2>
+    <p class="hint">Ubicación usada para el clima local y el resumen de la mañana.</p>
+    <div class="grid">
+      <div class="field">
+        <label for="weather_lat">Latitud del clima</label>
+        <input id="weather_lat" type="number" step="0.000001" placeholder="0.000000">
+      </div>
+      <div class="field">
+        <label for="weather_lon">Longitud del clima</label>
+        <input id="weather_lon" type="number" step="0.000001" placeholder="0.000000">
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Resumen de la mañana</h2>
+    <p class="hint">Resumen diario hablado con calendario, correo y clima.</p>
+    <div class="grid">
+      <div class="field">
+        <label for="briefing_time">Hora del resumen</label>
+        <input id="briefing_time" type="time">
+      </div>
+      <div class="field row-check">
+        <input id="briefing_enabled" type="checkbox">
+        <label for="briefing_enabled" style="font-size:13px;color:var(--text)">Activar resumen diario</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>SMTP / Email</h2>
+    <p class="hint">Configuración de correo saliente para enviar mensajes por SMTP.</p>
+    <div class="grid">
+      <div class="field">
+        <label for="smtp_host">Servidor SMTP</label>
+        <input id="smtp_host" placeholder="smtp.gmail.com">
+      </div>
+      <div class="field">
+        <label for="smtp_port">Puerto SMTP</label>
+        <input id="smtp_port" type="number" step="1" min="1" placeholder="587">
+      </div>
+      <div class="field">
+        <label for="smtp_user">Usuario SMTP</label>
+        <input id="smtp_user" placeholder="tu-correo@gmail.com">
+      </div>
+      <div class="field">
+        <label for="smtp_password">Contraseña SMTP</label>
+        <input id="smtp_password" type="password" placeholder="application password">
+      </div>
+      <div class="field full row-check">
+        <input id="smtp_use_tls" type="checkbox">
+        <label for="smtp_use_tls" style="font-size:13px;color:var(--text)">Usar TLS</label>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Telegram</h2>
+    <p class="hint">Configuración de control remoto para el bot de Telegram.</p>
+    <div class="grid">
+      <div class="field">
+        <label for="telegram_bot_token">Token del bot de Telegram</label>
+        <input id="telegram_bot_token" type="password" placeholder="bot token">
+      </div>
+      <div class="field">
+        <label for="telegram_allowed_chats">IDs de chats permitidos</label>
+        <input id="telegram_allowed_chats" placeholder="123456789,987654321">
+      </div>
+    </div>
+  </section>
+  <section class="card">
     <h2>Conexiones MCP</h2>
     <p class="hint">Servidores MCP externos que amplían lo que Eclipse puede hacer. Las tools nativas siguen funcionando igual.</p>
     <div id="mcp-list"></div>
@@ -229,7 +300,10 @@
 <script>
   const FIELDS = ["llm_provider","llm_model","llm_base_url","deepseek_api_key","openai_api_key",
     "embed_model","vision_model","tts_neural","tts_voice","whisper_model","wake_threshold",
-    "builtin_wakeword","imap_host","imap_user","imap_password","calendar_ics_url","auto_execute"];
+    "builtin_wakeword","imap_host","imap_user","imap_password","calendar_ics_url",
+    "weather_lat","weather_lon","briefing_enabled","briefing_time","smtp_host","smtp_port",
+    "smtp_user","smtp_password","smtp_use_tls","telegram_bot_token","telegram_allowed_chats",
+    "auto_execute"];
 
   const STATUS_COLORS = { idle:"#7878a0", listening:"#2ecc71", thinking:"#f1c40f",
     speaking:"#3498db", paused:"#e74c3c", offline:"#5a5a5a" };
