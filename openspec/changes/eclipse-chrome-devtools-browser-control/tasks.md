@@ -47,5 +47,5 @@ Chain strategy: feature-branch-chain
 
 ## Phase 4: Verification / Rollout
 
-- [ ] 4.1 Run focused tests for settings, router, browser automation, snapshots, screen fallback, media playback, notification replies, and audit redaction.
-- [ ] 4.2 Update `openspec/changes/eclipse-chrome-devtools-browser-control/tasks.md` checkboxes as PR slices complete; keep `agent-browser` fallback deprecation as warning-only.
+- [x] 4.1 Run focused tests for settings, router, browser automation, snapshots, screen fallback, media playback, notification replies, and audit redaction.
+- [x] 4.2 Update `openspec/changes/eclipse-chrome-devtools-browser-control/tasks.md` checkboxes as PR slices complete; keep `agent-browser` fallback deprecation as warning-only.
