@@ -33,10 +33,10 @@ Chain strategy: feature-branch-chain
 
 ## Phase 2: Chrome DevTools Adapter / Service Policy
 
-- [ ] 2.1 Create `src/eclipse_agent/chrome_devtools_mcp.py` using the existing MCP client path for tool discovery, non-attaching health, session mode config, and tool-name mapping.
-- [ ] 2.2 Implement `BrowserControlService` backend classification, pre-attach consent gates, confirmation gates, fallback decisions, and privacy-safe audit payloads in `src/eclipse_agent/browser_control.py`.
-- [ ] 2.3 Add unit tests for least-powerful backend selection, missing/revoked consent fail-closed behavior, confirmation-required actions, and redacted audit detail.
-- [ ] 2.4 Add adapter tests with fake MCP clients for configured/discovered/missing tools and managed/browser-url/ws-endpoint/auto-connect modes.
+- [x] 2.1 Create `src/eclipse_agent/chrome_devtools_mcp.py` using the existing MCP client path for tool discovery, non-attaching health, session mode config, and tool-name mapping.
+- [x] 2.2 Implement `BrowserControlService` backend classification, pre-attach consent gates, confirmation gates, fallback decisions, and privacy-safe audit payloads in `src/eclipse_agent/browser_control.py`.
+- [x] 2.3 Add unit tests for least-powerful backend selection, missing/revoked consent fail-closed behavior, confirmation-required actions, and redacted audit detail.
+- [x] 2.4 Add adapter tests with fake MCP clients for configured/discovered/missing tools and managed/browser-url/ws-endpoint/auto-connect modes.
 
 ## Phase 3: Routing / Integrations / Fallbacks
 
