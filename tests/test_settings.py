@@ -1,4 +1,10 @@
 from eclipse_agent import main as main_module
+from eclipse_agent.browser_control import (
+    BrowserBackend,
+    BrowserSessionMode,
+    browser_audit_detail,
+    redact_browser_audit_payload,
+)
 from eclipse_agent.settings import (
     EclipseSettings,
     apply_to_env,
@@ -29,6 +35,11 @@ def test_load_missing_returns_defaults(tmp_path):
     settings = load_settings(tmp_path / "nope.json")
     assert settings.llm_provider == "ollama"
     assert settings.tts_neural is True
+    assert settings.browser_backend_policy == "native_simple_plus_fallback"
+    assert settings.browser_session_mode == "managed"
+    assert settings.browser_live_access_consent is False
+    assert settings.browser_allow_vision_fallback is True
+    assert settings.browser_allow_agent_browser_fallback is True
 
 
 def test_settings_from_dict_coerces_and_ignores_unknown():
@@ -42,16 +53,100 @@ def test_settings_from_dict_coerces_and_ignores_unknown():
     assert settings.llm_provider == "ollama"  # default kept
 
 
+def test_settings_from_dict_coerces_false_strings_fail_closed():
+    settings = settings_from_dict(
+        {
+            "browser_live_access_consent": "false",
+            "browser_devtools_auto_connect": "0",
+            "browser_allow_agent_browser_fallback": "off",
+            "browser_confirm_sensitive_actions": "yes",
+        }
+    )
+
+    assert settings.browser_live_access_consent is False
+    assert settings.browser_devtools_auto_connect is False
+    assert settings.browser_allow_agent_browser_fallback is False
+    assert settings.browser_confirm_sensitive_actions is True
+
+
 def test_apply_to_env_sets_vars_and_skips_blanks():
     env: dict[str, str] = {}
     apply_to_env(
-        EclipseSettings(llm_model="qwen", tts_neural=False, imap_user="", openai_api_key="k"),
+        EclipseSettings(
+            llm_model="qwen",
+            tts_neural=False,
+            imap_user="",
+            openai_api_key="k",
+            browser_live_access_consent=False,
+        ),
         env=env,
     )
     assert env["ECLIPSE_LLM_MODEL"] == "qwen"
     assert env["ECLIPSE_TTS_NEURAL"] == "0"  # bool -> "0"/"1"
     assert env["OPENAI_API_KEY"] == "k"
+    assert env["ECLIPSE_BROWSER_LIVE_ACCESS_CONSENT"] == "0"
     assert "ECLIPSE_IMAP_USER" not in env  # blank does not clobber
+
+
+def test_browser_control_settings_roundtrip(tmp_path):
+    settings = EclipseSettings(
+        browser_backend_policy="chrome_devtools_when_consented",
+        browser_session_mode="browser_url",
+        browser_devtools_browser_url="http://127.0.0.1:9222",
+        browser_devtools_ws_endpoint="ws://127.0.0.1:9222/devtools/browser/abc",
+        browser_devtools_auto_connect=True,
+        browser_devtools_mcp_server="chrome-devtools",
+        browser_live_access_consent=True,
+        browser_confirm_sensitive_actions=True,
+        browser_allow_vision_fallback=True,
+        browser_allow_agent_browser_fallback=False,
+    )
+
+    path = save_settings(settings, tmp_path / "config.json")
+    loaded = load_settings(path)
+
+    assert loaded.browser_backend_policy == "chrome_devtools_when_consented"
+    assert loaded.browser_session_mode == "browser_url"
+    assert loaded.browser_devtools_browser_url == "http://127.0.0.1:9222"
+    assert loaded.browser_devtools_ws_endpoint.endswith("/abc")
+    assert loaded.browser_devtools_auto_connect is True
+    assert loaded.browser_live_access_consent is True
+    assert loaded.browser_allow_agent_browser_fallback is False
+
+
+def test_browser_audit_redacts_sensitive_payload():
+    redacted = redact_browser_audit_payload(
+        {
+            "backend": "chrome_devtools",
+            "cookie": "session=secret",
+            "target_url": "https://example.com/callback?token=secret",
+            "page_content": "<html>secret</html>",
+            "nested": {"token": "abc", "safe": "kept"},
+        }
+    )
+
+    assert redacted["backend"] == "chrome_devtools"
+    assert redacted["cookie"] == "[redacted]"
+    assert redacted["target_url"] == "[redacted]"
+    assert redacted["page_content"] == "[redacted]"
+    assert redacted["nested"]["token"] == "[redacted]"
+    assert redacted["nested"]["safe"] == "kept"
+
+
+def test_browser_audit_detail_shape():
+    detail = browser_audit_detail(
+        backend=BrowserBackend.CHROME_DEVTOOLS,
+        mode=BrowserSessionMode.BROWSER_URL,
+        consent_state="denied",
+        confirmation_state="not_required",
+        fallback_reason="missing_consent",
+        outcome="blocked",
+        extra={"browser_url": "http://127.0.0.1:9222"},
+    )
+
+    assert '"backend": "chrome_devtools"' in detail
+    assert '"session_mode": "browser_url"' in detail
+    assert "127.0.0.1" not in detail
 
 
 # --- settings API --------------------------------------------------------
@@ -199,6 +294,33 @@ def test_api_mcp_roundtrip(monkeypatch, tmp_path):
     result = api.save_mcp_servers([{"name": "browser", "command": "python", "args": []}])
     assert result["ok"] is True
     assert api.list_mcp_servers()[0]["name"] == "browser"
+
+
+def test_browser_control_diagnostics_default_off(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    api = SettingsApi()
+
+    diagnostics = api.browser_control_diagnostics()
+
+    assert diagnostics["ok"] is True
+    assert diagnostics["non_attaching"] is True
+    assert diagnostics["session_mode"] == "managed"
+    assert diagnostics["live_access_consent"] is False
+    assert diagnostics["attach_allowed"] is False
+    assert diagnostics["safe_fallbacks"] == {"vision": True, "agent_browser": True}
+
+
+def test_browser_control_diagnostics_detects_devtools_mcp(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    api = SettingsApi()
+    api.save_mcp_servers(
+        [{"name": "chrome-devtools", "command": "npx", "args": ["chrome-devtools-mcp"]}]
+    )
+
+    diagnostics = api.browser_control_diagnostics()
+
+    assert diagnostics["devtools_mcp_configured"] is True
+    assert diagnostics["matching_mcp_servers"] == ["chrome-devtools"]
 
 
 # --- CLI -----------------------------------------------------------------

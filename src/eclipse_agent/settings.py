@@ -59,6 +59,18 @@ class EclipseSettings:
     # Telegram bot
     telegram_bot_token: str = ""
     telegram_allowed_chats: str = ""  # comma-separated chat IDs
+    # Browser control (Chrome DevTools MCP is opt-in; native/simple remains default)
+    browser_backend_policy: str = "native_simple_plus_fallback"
+    browser_session_mode: str = "managed"
+    browser_managed_profile: str = "eclipse-browser-control"
+    browser_devtools_browser_url: str = ""
+    browser_devtools_ws_endpoint: str = ""
+    browser_devtools_auto_connect: bool = False
+    browser_devtools_mcp_server: str = "chrome-devtools"
+    browser_live_access_consent: bool = False
+    browser_confirm_sensitive_actions: bool = True
+    browser_allow_vision_fallback: bool = True
+    browser_allow_agent_browser_fallback: bool = True
 
 
 _ENV_MAP: dict[str, str] = {
@@ -90,6 +102,17 @@ _ENV_MAP: dict[str, str] = {
     "briefing_time": "ECLIPSE_BRIEFING_TIME",
     "telegram_bot_token": "ECLIPSE_TELEGRAM_BOT_TOKEN",
     "telegram_allowed_chats": "ECLIPSE_TELEGRAM_ALLOWED_CHATS",
+    "browser_backend_policy": "ECLIPSE_BROWSER_BACKEND_POLICY",
+    "browser_session_mode": "ECLIPSE_BROWSER_SESSION_MODE",
+    "browser_managed_profile": "ECLIPSE_BROWSER_MANAGED_PROFILE",
+    "browser_devtools_browser_url": "ECLIPSE_BROWSER_DEVTOOLS_BROWSER_URL",
+    "browser_devtools_ws_endpoint": "ECLIPSE_BROWSER_DEVTOOLS_WS_ENDPOINT",
+    "browser_devtools_auto_connect": "ECLIPSE_BROWSER_DEVTOOLS_AUTO_CONNECT",
+    "browser_devtools_mcp_server": "ECLIPSE_BROWSER_DEVTOOLS_MCP_SERVER",
+    "browser_live_access_consent": "ECLIPSE_BROWSER_LIVE_ACCESS_CONSENT",
+    "browser_confirm_sensitive_actions": "ECLIPSE_BROWSER_CONFIRM_SENSITIVE_ACTIONS",
+    "browser_allow_vision_fallback": "ECLIPSE_BROWSER_ALLOW_VISION_FALLBACK",
+    "browser_allow_agent_browser_fallback": "ECLIPSE_BROWSER_ALLOW_AGENT_BROWSER_FALLBACK",
 }
 
 
@@ -105,7 +128,7 @@ def settings_from_dict(data: dict) -> EclipseSettings:
         current = getattr(defaults, name)
         raw = data[name]
         if isinstance(current, bool):
-            values[name] = bool(raw)
+            values[name] = _bool(raw)
         elif isinstance(current, int):
             try:
                 values[name] = int(raw)
@@ -119,6 +142,14 @@ def settings_from_dict(data: dict) -> EclipseSettings:
         else:
             values[name] = "" if raw is None else str(raw)
     return EclipseSettings(**values)
+
+
+def _bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def load_settings(path: str | Path | None = None) -> EclipseSettings:

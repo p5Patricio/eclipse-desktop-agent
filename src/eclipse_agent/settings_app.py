@@ -17,6 +17,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from eclipse_agent.audit import AuditLog
+from eclipse_agent.browser_control import BrowserSessionMode
 from eclipse_agent.killswitch import KillSwitch
 from eclipse_agent.settings import (
     EclipseSettings,
@@ -153,6 +154,52 @@ class SettingsApi:
             return {"ok": False, "message": f"No se pudo guardar: {exc}"}
         return {"ok": True, "message": f"Servidores MCP guardados ({path.name})."}
 
+    # --- browser control ---
+
+    def browser_control_diagnostics(self) -> dict:
+        """Return non-attaching browser-control diagnostics for the settings UI."""
+
+        settings = load_settings()
+        servers = load_mcp_servers()
+        selected_server = settings.browser_devtools_mcp_server.strip().casefold()
+        matching_servers = [
+            str(server.get("name", ""))
+            for server in servers
+            if _looks_like_chrome_devtools_server(server, selected_server)
+        ]
+        try:
+            session_mode = BrowserSessionMode(settings.browser_session_mode)
+        except ValueError:
+            session_mode = BrowserSessionMode.MANAGED
+
+        live_access_consent = bool(settings.browser_live_access_consent)
+        attach_allowed = live_access_consent
+        messages: list[str] = [
+            "Diagnostics are non-attaching; no Chrome window was inspected.",
+        ]
+        if not matching_servers:
+            messages.append("Chrome DevTools MCP is not configured in MCP servers.")
+        if not live_access_consent:
+            messages.append("Live browser access is off; DevTools attach will fail closed.")
+        if settings.browser_allow_agent_browser_fallback:
+            messages.append("Legacy agent-browser fallback remains enabled as a fallback only.")
+
+        return {
+            "ok": True,
+            "non_attaching": True,
+            "backend_policy": settings.browser_backend_policy,
+            "session_mode": session_mode.value,
+            "devtools_mcp_configured": bool(matching_servers),
+            "matching_mcp_servers": matching_servers,
+            "live_access_consent": live_access_consent,
+            "attach_allowed": attach_allowed,
+            "safe_fallbacks": {
+                "vision": bool(settings.browser_allow_vision_fallback),
+                "agent_browser": bool(settings.browser_allow_agent_browser_fallback),
+            },
+            "messages": messages,
+        }
+
     def list_tts_voices(self) -> list[str]:
         try:
             from winrt.windows.media.speechsynthesis import SpeechSynthesizer
@@ -185,3 +232,16 @@ def run_settings_app() -> None:  # pragma: no cover - GUI window
         min_size=(640, 600),
     )
     webview.start()
+
+
+def _looks_like_chrome_devtools_server(server: dict, selected_server: str) -> bool:
+    haystack = " ".join(
+        (
+            str(server.get("name", "")),
+            str(server.get("command", "")),
+            " ".join(str(arg) for arg in server.get("args", []) or []),
+        )
+    ).casefold()
+    if selected_server and str(server.get("name", "")).casefold() == selected_server:
+        return True
+    return "chrome" in haystack and "devtools" in haystack

@@ -26,10 +26,10 @@ Chain strategy: feature-branch-chain
 
 ## Phase 1: Foundation / Settings / Diagnostics
 
-- [ ] 1.1 Create `src/eclipse_agent/browser_control.py` with `BrowserBackend`, `BrowserSessionMode`, request/result dataclasses, consent/confirmation policy shells, and redacted audit helpers.
-- [ ] 1.2 Add browser-control settings fields in `src/eclipse_agent/settings.py` with safe defaults: native/simple policy, disabled live attach consent, enabled safe fallbacks.
-- [ ] 1.3 Extend `src/eclipse_agent/settings_app.py` and `src/eclipse_agent/gui/settings.html` with backend mode, session parameters, consent, fallback toggles, diagnostics, and warning copy.
-- [ ] 1.4 Add/extend `tests/test_settings.py` and `tests/test_settings_gui.py` for persistence, diagnostics shape, and default-off live access.
+- [x] 1.1 Create `src/eclipse_agent/browser_control.py` with `BrowserBackend`, `BrowserSessionMode`, request/result dataclasses, consent/confirmation policy shells, and redacted audit helpers.
+- [x] 1.2 Add browser-control settings fields in `src/eclipse_agent/settings.py` with safe defaults: native/simple policy, disabled live attach consent, enabled safe fallbacks.
+- [x] 1.3 Extend `src/eclipse_agent/settings_app.py` and `src/eclipse_agent/gui/settings.html` with backend mode, session parameters, consent, fallback toggles, diagnostics, and warning copy.
+- [x] 1.4 Add/extend `tests/test_settings.py` and `tests/test_settings_gui.py` for persistence, diagnostics shape, and default-off live access.
 
 ## Phase 2: Chrome DevTools Adapter / Service Policy
 

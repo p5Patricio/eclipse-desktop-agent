@@ -73,6 +73,14 @@
   .audit-empty { padding: 12px; color: var(--muted); font-size: 12px; }
   .mcp-row { display: grid; grid-template-columns: 1fr 1fr 1.4fr auto; gap: 8px; margin-bottom: 8px; align-items: center; }
   .mcp-row button { padding: 8px 12px; }
+  .warning {
+    border: 1px solid rgba(241, 196, 15, 0.45); background: rgba(241, 196, 15, 0.08);
+    border-radius: 8px; color: #f5d76e; padding: 10px 12px; font-size: 12px;
+  }
+  .diagnostics {
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    color: var(--muted); font-size: 12px; min-height: 38px;
+  }
 </style>
 </head>
 <body>
@@ -269,6 +277,73 @@
       </div>
     </div>
   </section>
+
+  <section class="card">
+    <h2>Browser Control</h2>
+    <p class="hint">Control del navegador con valores seguros: abrir/buscar sigue siendo nativo; DevTools requiere consentimiento explícito.</p>
+    <div class="grid">
+      <div class="field">
+        <label for="browser_backend_policy">Modo de backend</label>
+        <select id="browser_backend_policy">
+          <option value="native_simple_plus_fallback">Nativo para acciones simples + fallbacks</option>
+          <option value="chrome_devtools_when_consented">Chrome DevTools cuando haya consentimiento</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="browser_session_mode">Modo de sesión DevTools</label>
+        <select id="browser_session_mode">
+          <option value="managed">Perfil administrado</option>
+          <option value="browser_url">Browser URL</option>
+          <option value="ws_endpoint">WebSocket endpoint</option>
+          <option value="auto_connect">Auto connect</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="browser_managed_profile">Perfil administrado</label>
+        <input id="browser_managed_profile" placeholder="eclipse-browser-control">
+      </div>
+      <div class="field">
+        <label for="browser_devtools_mcp_server">Servidor MCP DevTools</label>
+        <input id="browser_devtools_mcp_server" placeholder="chrome-devtools">
+      </div>
+      <div class="field">
+        <label for="browser_devtools_browser_url">Browser URL</label>
+        <input id="browser_devtools_browser_url" placeholder="http://127.0.0.1:9222">
+      </div>
+      <div class="field">
+        <label for="browser_devtools_ws_endpoint">WebSocket endpoint</label>
+        <input id="browser_devtools_ws_endpoint" placeholder="ws://127.0.0.1:9222/devtools/browser/...">
+      </div>
+      <div class="field row-check">
+        <input id="browser_devtools_auto_connect" type="checkbox">
+        <label for="browser_devtools_auto_connect" style="font-size:13px;color:var(--text)">Permitir autoConnect cuando esté consentido</label>
+      </div>
+      <div class="field row-check">
+        <input id="browser_live_access_consent" type="checkbox">
+        <label for="browser_live_access_consent" style="font-size:13px;color:var(--text)">Permitir acceso al navegador en vivo</label>
+      </div>
+      <div class="field row-check">
+        <input id="browser_confirm_sensitive_actions" type="checkbox">
+        <label for="browser_confirm_sensitive_actions" style="font-size:13px;color:var(--text)">Confirmar acciones sensibles</label>
+      </div>
+      <div class="field row-check">
+        <input id="browser_allow_vision_fallback" type="checkbox">
+        <label for="browser_allow_vision_fallback" style="font-size:13px;color:var(--text)">Permitir fallback screenshot + visión</label>
+      </div>
+      <div class="field row-check">
+        <input id="browser_allow_agent_browser_fallback" type="checkbox">
+        <label for="browser_allow_agent_browser_fallback" style="font-size:13px;color:var(--text)">Mantener agent-browser como fallback</label>
+      </div>
+      <div class="full warning">
+        El acceso en vivo puede exponer pestañas, sesiones autenticadas y contenido sensible. Los diagnósticos de esta pantalla no se adjuntan a Chrome.
+      </div>
+    </div>
+    <div class="inline">
+      <button class="ghost" onclick="checkBrowserControl()">Diagnóstico Browser Control</button>
+      <span id="browser-control-status" class="status"></span>
+    </div>
+    <div id="browser-control-diagnostics" class="diagnostics">Sin diagnóstico todavía.</div>
+  </section>
   <section class="card">
     <h2>Conexiones MCP</h2>
     <p class="hint">Servidores MCP externos que amplían lo que Eclipse puede hacer. Las tools nativas siguen funcionando igual.</p>
@@ -303,6 +378,10 @@
     "builtin_wakeword","imap_host","imap_user","imap_password","calendar_ics_url",
     "weather_lat","weather_lon","briefing_enabled","briefing_time","smtp_host","smtp_port",
     "smtp_user","smtp_password","smtp_use_tls","telegram_bot_token","telegram_allowed_chats",
+    "browser_backend_policy","browser_session_mode","browser_managed_profile",
+    "browser_devtools_browser_url","browser_devtools_ws_endpoint","browser_devtools_auto_connect",
+    "browser_devtools_mcp_server","browser_live_access_consent","browser_confirm_sensitive_actions",
+    "browser_allow_vision_fallback","browser_allow_agent_browser_fallback",
     "auto_execute"];
 
   const STATUS_COLORS = { idle:"#7878a0", listening:"#2ecc71", thinking:"#f1c40f",
@@ -371,6 +450,30 @@
     flash("mcp-status", res.message, res.ok);
   }
 
+  async function checkBrowserControl() {
+    const box = document.getElementById("browser-control-diagnostics");
+    const status = document.getElementById("browser-control-status");
+    status.textContent = "Diagnosticando…"; status.className = "status";
+    try {
+      const res = await window.pywebview.api.browser_control_diagnostics();
+      status.textContent = res.non_attaching ? "Diagnóstico sin adjuntar" : "Revisar diagnóstico";
+      status.className = "status " + (res.ok ? "ok" : "err");
+      const fallback = res.safe_fallbacks || {};
+      box.innerHTML = [
+        `Backend: ${esc(res.backend_policy)}`,
+        `Sesión: ${esc(res.session_mode)}`,
+        `MCP DevTools configurado: ${res.devtools_mcp_configured ? "sí" : "no"}`,
+        `Consentimiento live: ${res.live_access_consent ? "activo" : "desactivado"}`,
+        `Attach permitido: ${res.attach_allowed ? "sí" : "no"}`,
+        `Fallbacks: visión=${fallback.vision ? "sí" : "no"}, agent-browser=${fallback.agent_browser ? "sí" : "no"}`,
+        ...(res.messages || []),
+      ].map(line => `<div>${esc(line)}</div>`).join("");
+    } catch (e) {
+      status.textContent = "No se pudo diagnosticar"; status.className = "status err";
+      box.textContent = String(e);
+    }
+  }
+
   async function load() {
     const s = await window.pywebview.api.get_settings();
     for (const f of FIELDS) {
@@ -384,6 +487,7 @@
     refreshStatus();
     loadAudit();
     loadMcp();
+    checkBrowserControl();
     setInterval(() => { refreshStatus(); loadAudit(); }, 2500);
   }
 
