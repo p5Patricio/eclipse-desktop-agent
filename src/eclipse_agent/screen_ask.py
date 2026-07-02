@@ -6,7 +6,7 @@ Captures a screenshot and sends it to the configured vision model for analysis.
 from __future__ import annotations
 
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,8 @@ class ScreenAskResult:
     image_path: Path
     error: str = ""
     window_title: str | None = None
+    fallback_reason: str = ""
+    evidence: dict[str, str] = field(default_factory=dict)
 
 
 def ask_about_screen(
@@ -33,6 +35,7 @@ def ask_about_screen(
     *,
     capture: Any = None,
     vision: Any = None,
+    fallback_reason: str = "",
 ) -> ScreenAskResult:
     """Capture a screenshot then ask the vision model about it.
 
@@ -68,6 +71,13 @@ def ask_about_screen(
                 image_path=image_path,
                 error=msg,
                 window_title=window_title,
+                fallback_reason=fallback_reason,
+                evidence=_screen_fallback_evidence(
+                    fallback_reason=fallback_reason,
+                    window_title=window_title,
+                    image_path=image_path,
+                    outcome="capture_failed",
+                ),
             )
         redact_screenshot(str(image_path))
     except Exception as exc:  # noqa: BLE001
@@ -78,6 +88,13 @@ def ask_about_screen(
             image_path=image_path,
             error=str(exc),
             window_title=window_title,
+            fallback_reason=fallback_reason,
+            evidence=_screen_fallback_evidence(
+                fallback_reason=fallback_reason,
+                window_title=window_title,
+                image_path=image_path,
+                outcome="capture_failed",
+            ),
         )
 
     if window_title:
@@ -94,6 +111,13 @@ def ask_about_screen(
             image_path=image_path,
             error=str(exc),
             window_title=window_title,
+            fallback_reason=fallback_reason,
+            evidence=_screen_fallback_evidence(
+                fallback_reason=fallback_reason,
+                window_title=window_title,
+                image_path=image_path,
+                outcome="vision_failed",
+            ),
         )
 
     if not result.success:
@@ -104,6 +128,13 @@ def ask_about_screen(
             image_path=image_path,
             error=result.message,
             window_title=window_title,
+            fallback_reason=fallback_reason,
+            evidence=_screen_fallback_evidence(
+                fallback_reason=fallback_reason,
+                window_title=window_title,
+                image_path=image_path,
+                outcome="vision_failed",
+            ),
         )
 
     return ScreenAskResult(
@@ -112,6 +143,13 @@ def ask_about_screen(
         model=result.model,
         image_path=image_path,
         window_title=window_title,
+        fallback_reason=fallback_reason,
+        evidence=_screen_fallback_evidence(
+            fallback_reason=fallback_reason,
+            window_title=window_title,
+            image_path=image_path,
+            outcome="answered",
+        ),
     )
 
 
@@ -119,3 +157,21 @@ def render_screen_ask_result(result: ScreenAskResult) -> str:
     if not result.success:
         return f"Screen ask failed: {result.error}"
     return result.answer
+
+
+def _screen_fallback_evidence(
+    *,
+    fallback_reason: str,
+    window_title: str | None,
+    image_path: Path,
+    outcome: str,
+) -> dict[str, str]:
+    """Return privacy-safe fallback evidence without page or OCR content."""
+
+    return {
+        "backend": "vision",
+        "fallback_reason": fallback_reason,
+        "window_title": window_title or "",
+        "image_path": str(image_path),
+        "outcome": outcome,
+    }

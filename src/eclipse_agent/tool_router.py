@@ -13,6 +13,12 @@ from typing import Any, Protocol
 from urllib.parse import quote_plus
 
 from eclipse_agent.audit import AuditEntry, AuditLog
+from eclipse_agent.browser_control import (
+    BrowserControlRequest,
+    BrowserControlResult,
+    BrowserControlService,
+    redact_browser_audit_payload,
+)
 from eclipse_agent.killswitch import KillSwitch
 from eclipse_agent.pal.factory import PlatformFactory
 from eclipse_agent.planner import (
@@ -589,7 +595,20 @@ class NativeMCPClient:
                 target=app_name,
                 reason="Tell me what you want to play.",
             )
-        result = open_media_search(app_name, query, dry_run=False)
+        result = open_media_search(
+            app_name,
+            query,
+            dry_run=False,
+            requested_interaction=str(
+                arguments.get("requested_interaction")
+                or arguments.get("interaction")
+                or arguments.get("browser_action")
+                or arguments.get("action")
+                or ""
+            ),
+            confirmed=_bool_parameter(arguments.get("confirmed"))
+            or _bool_parameter(arguments.get("_confirmed")),
+        )
         if result.success:
             return _native_success(
                 action_type="play_media",
@@ -913,12 +932,14 @@ class ToolRouter:
         vision_adapter: VisionAdapterProtocol | None = None,
         audit_log: AuditLog | None = None,
         kill_switch: KillSwitch | None = None,
+        browser_control_service: BrowserControlService | None = None,
     ) -> None:
         self.mcp_client = mcp_client or MCPToolClient()
         self.static_tools = static_tools
         self.vision_adapter = vision_adapter or VisionAdapter()
         self.audit_log = audit_log
         self.kill_switch = kill_switch
+        self.browser_control_service = browser_control_service
         self._tool_cache: tuple[MCPToolDefinition, ...] | None = None
 
     @classmethod
@@ -983,11 +1004,11 @@ class ToolRouter:
             self.audit_log.record(
                 AuditEntry(
                     action_kind=action.kind.value,
-                    target=str(action.target),
+                    target=_audit_target_for_result(action, result),
                     risk_level=action.risk_level.value,
                     status=status,
                     tool_name=result.tool_name,
-                    detail=str(result.message)[:500],
+                    detail=_audit_detail_for_result(result),
                 )
             )
         except Exception:  # noqa: BLE001 - auditing must never break routing
@@ -1004,6 +1025,10 @@ class ToolRouter:
         if blocked:
             return blocked
 
+        browser_control_result = self._maybe_route_browser_control(action, context)
+        if browser_control_result is not None:
+            return browser_control_result
+
         tool = self._select_tool(action)
         if tool is None:
             return ToolExecutionResult(
@@ -1017,6 +1042,8 @@ class ToolRouter:
             )
 
         arguments = {"target": action.target, **action.parameters}
+        if tool.server_name == "native":
+            arguments["_confirmed"] = context.confirmed
         if context.dry_run:
             return ToolExecutionResult(
                 action_id=action.id,
@@ -1104,6 +1131,14 @@ class ToolRouter:
 
     def _select_tool(self, action: PlannedAction) -> MCPToolDefinition | None:
         tools = self.discover_tools()
+        if action.kind in {
+            ActionKind.OPEN_WEB_APP,
+            ActionKind.BROWSER_SEARCH,
+            ActionKind.GOOGLE_SEARCH,
+        } and not _requires_rich_browser_control(action):
+            native = _native_browser_tool_for(action, tools)
+            if native is not None:
+                return native
         if action.tool_name:
             for tool in tools:
                 if action.tool_name in {tool.name, tool.qualified_name}:
@@ -1112,6 +1147,21 @@ class ToolRouter:
             if action.kind in tool.action_kinds:
                 return tool
         return None
+
+    def _maybe_route_browser_control(
+        self,
+        action: PlannedAction,
+        context: ToolExecutionContext,
+    ) -> ToolExecutionResult | None:
+        request = _rich_browser_control_request(action)
+        if request is None:
+            return None
+
+        service = self.browser_control_service or BrowserControlService(
+            audit_log=self.audit_log
+        )
+        decision = service.evaluate_request(request, confirmed=context.confirmed)
+        return _browser_control_execution_result(action, decision)
 
     def _maybe_analyze_screenshot(
         self,
@@ -1197,6 +1247,191 @@ def _audit_status(result: ToolExecutionResult) -> str:
     if not result.success:
         return "failed"
     return "prepared"
+
+
+def _native_browser_tool_for(
+    action: PlannedAction,
+    tools: tuple[MCPToolDefinition, ...],
+) -> MCPToolDefinition | None:
+    expected_names = {
+        ActionKind.OPEN_WEB_APP: {"open_url"},
+        ActionKind.BROWSER_SEARCH: {"open_url"},
+        ActionKind.GOOGLE_SEARCH: {"google_search"},
+    }.get(action.kind, set())
+    for tool in tools:
+        if tool.server_name == "native" and tool.name in expected_names:
+            return tool
+    return None
+
+
+def _rich_browser_control_request(action: PlannedAction) -> BrowserControlRequest | None:
+    if not _is_browser_action(action):
+        return None
+    parameters = action.parameters
+    if not _requires_rich_browser_control(action):
+        return None
+    browser_action = str(
+        parameters.get("browser_action")
+        or parameters.get("action")
+        or _action_name_for_browser_control(action)
+    )
+    return BrowserControlRequest(
+        intent=action.kind.value,
+        url=str(parameters.get("url") or parameters.get("target_url") or action.target or ""),
+        action=browser_action,
+        selector=str(parameters.get("selector") or ""),
+        text=str(parameters.get("text") or parameters.get("value") or ""),
+        sensitive=_bool_parameter(parameters.get("sensitive"))
+        or action.risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL},
+        requires_live_browser=True,
+        metadata={
+            "planned_action_id": action.id,
+            "tool_name": action.tool_name or "",
+        },
+    )
+
+
+def _is_browser_action(action: PlannedAction) -> bool:
+    if action.kind in {
+        ActionKind.OPEN_WEB_APP,
+        ActionKind.BROWSER_SEARCH,
+        ActionKind.GOOGLE_SEARCH,
+    }:
+        return True
+    haystack = " ".join(
+        (
+            action.kind.value,
+            action.tool_name or "",
+            action.description,
+            action.target,
+            " ".join(f"{key} {value}" for key, value in action.parameters.items()),
+        )
+    ).casefold()
+    return any(
+        token in haystack
+        for token in (
+            "browser",
+            "chrome",
+            "devtools",
+            "page",
+            "tab",
+            "snapshot",
+            "selector",
+        )
+    )
+
+
+def _requires_rich_browser_control(action: PlannedAction) -> bool:
+    parameters = action.parameters
+    if _bool_parameter(parameters.get("rich_browser_control")):
+        return True
+    if _bool_parameter(parameters.get("requires_live_browser")):
+        return True
+    if any(
+        key in parameters
+        for key in (
+            "selector",
+            "script",
+            "expression",
+            "snapshot",
+            "inspect",
+        )
+    ):
+        return True
+    browser_action = str(parameters.get("browser_action") or parameters.get("action") or "").casefold()
+    return any(
+        token in browser_action
+        for token in (
+            "click",
+            "fill",
+            "type",
+            "submit",
+            "send",
+            "snapshot",
+            "inspect",
+            "evaluate",
+            "script",
+            "console",
+            "network",
+            "performance",
+        )
+    )
+
+
+def _bool_parameter(value: object) -> bool:
+    """Parse planner bool-like parameters fail-closed."""
+
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "yes", "on"}
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value == 1
+    return False
+
+
+def _action_name_for_browser_control(action: PlannedAction) -> str:
+    if action.kind is ActionKind.OPEN_WEB_APP:
+        return "open"
+    if action.kind in {ActionKind.BROWSER_SEARCH, ActionKind.GOOGLE_SEARCH}:
+        return "search"
+    return "browser_control"
+
+
+def _browser_control_execution_result(
+    action: PlannedAction,
+    decision: BrowserControlResult,
+) -> ToolExecutionResult:
+    metadata = {
+        "backend": decision.backend.value,
+        "fallback_reason": decision.fallback_reason,
+        "kind": action.kind.value,
+    }
+    if decision.mode is not None:
+        metadata["session_mode"] = decision.mode.value
+    return ToolExecutionResult(
+        action_id=action.id,
+        tool_name=f"browser_control.{decision.backend.value}",
+        success=decision.success,
+        executed=False,
+        requires_confirmation=decision.requires_confirmation,
+        message=decision.message,
+        metadata=metadata,
+        structured_content={
+            "browser_control": {
+                "backend": decision.backend.value,
+                "session_mode": decision.mode.value if decision.mode else "",
+                "fallback_reason": decision.fallback_reason,
+                "requires_confirmation": decision.requires_confirmation,
+                "audit_detail": decision.audit_detail,
+            }
+        },
+    )
+
+
+def _audit_target_for_result(action: PlannedAction, result: ToolExecutionResult) -> str:
+    """Return a privacy-safe audit target for router-level audit entries."""
+
+    if result.tool_name.startswith("browser_control."):
+        redacted = redact_browser_audit_payload({"target": action.target})
+        value = redacted.get("target", "[redacted]")
+        return str(value)
+    return str(action.target)
+
+
+def _audit_detail_for_result(result: ToolExecutionResult) -> str:
+    """Return privacy-safe detail for router-level audit entries."""
+
+    if result.tool_name.startswith("browser_control."):
+        browser_control = result.structured_content.get("browser_control")
+        if isinstance(browser_control, dict):
+            audit_detail = browser_control.get("audit_detail")
+            if audit_detail:
+                return str(audit_detail)[:500]
+        return "[redacted]"
+    return str(result.message)[:500]
 
 
 def _native_success(
@@ -1350,10 +1585,26 @@ def _server_command_for(client: MCPClientProtocol, tool: MCPToolDefinition) -> t
 
 
 def _string_metadata(action: PlannedAction, arguments: dict[str, Any]) -> dict[str, str]:
+    if _is_browser_action(action):
+        return {
+            "kind": action.kind.value,
+            "arguments": json.dumps(
+                _privacy_safe_router_arguments(arguments),
+                sort_keys=True,
+            ),
+        }
     return {
         "target": action.target,
         "kind": action.kind.value,
         "arguments": json.dumps(arguments, sort_keys=True),
+    }
+
+
+def _privacy_safe_router_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    redacted_keys = {"target", "url", "target_url", "browser_url", "ws_endpoint"}
+    return {
+        key: "[redacted]" if str(key).casefold() in redacted_keys else value
+        for key, value in arguments.items()
     }
 
 

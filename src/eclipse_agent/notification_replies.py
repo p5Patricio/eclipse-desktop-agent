@@ -18,6 +18,7 @@ from eclipse_agent.browser_automation import (
     parse_agent_browser_snapshot_json,
     render_browser_interaction_plan,
 )
+from eclipse_agent.browser_control import BrowserControlRequest, BrowserControlService
 from eclipse_agent.browser_ref_selector import (
     BrowserRefSelection,
     BrowserRefPurpose,
@@ -51,6 +52,7 @@ class NotificationReplyDraftResult:
     browser_plan: BrowserInteractionPlan | None = None
     ref_selection: BrowserRefSelection | None = None
     reply_text: str = ""
+    requires_confirmation: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -91,9 +93,11 @@ class NotificationReplyWorkflow:
         *,
         store: NotificationStore | None = None,
         browser_loop: BrowserInteractionLoop | None = None,
+        browser_control_service: BrowserControlService | None = None,
     ) -> None:
         self.store = store or NotificationStore()
         self.browser_loop = browser_loop or BrowserInteractionLoop()
+        self.browser_control_service = browser_control_service or BrowserControlService()
 
     def prepare_reply_draft(
         self,
@@ -104,6 +108,7 @@ class NotificationReplyWorkflow:
         confirmed: bool = False,
         snapshot_output: str | None = None,
         auto_select: bool = False,
+        send_after_fill: bool = False,
         dry_run: bool = True,
     ) -> NotificationReplyDraftResult:
         """Open the source web app or fill a confirmed draft field.
@@ -158,6 +163,18 @@ class NotificationReplyWorkflow:
                 )
 
         if selected_ref:
+            if send_after_fill and not confirmed:
+                return NotificationReplyDraftResult(
+                    success=False,
+                    event=event,
+                    ref_selection=ref_selection,
+                    message=(
+                        "Sending a notification reply is an indirect send action "
+                        "and requires explicit confirmation."
+                    ),
+                    reply_text=reply_text,
+                    requires_confirmation=True,
+                )
             plan = self.browser_loop.confirmed_ref_action(
                 kind=BrowserCommandKind.FILL,
                 selector=selected_ref,
@@ -177,6 +194,30 @@ class NotificationReplyWorkflow:
                     else "Browser draft fill is blocked until --confirmed is provided."
                 ),
                 reply_text=reply_text,
+                requires_confirmation=not success,
+            )
+
+        browser_decision = self.browser_control_service.evaluate_request(
+            BrowserControlRequest(
+                intent="notification_reply_prepare",
+                url=url,
+                action="snapshot",
+                requires_live_browser=True,
+                metadata={
+                    "planned_action_id": event.id,
+                    "source_app": event.app_name,
+                    "source_kind": event.source_kind.value,
+                },
+            ),
+            confirmed=confirmed,
+        )
+        if not browser_decision.success:
+            return NotificationReplyDraftResult(
+                success=False,
+                event=event,
+                message=browser_decision.message,
+                reply_text=reply_text,
+                requires_confirmation=browser_decision.requires_confirmation,
             )
 
         plan = self.browser_loop.open_and_snapshot(url, dry_run=dry_run)
@@ -189,6 +230,7 @@ class NotificationReplyWorkflow:
                 "ref, then run again with --selector and --confirmed to fill a draft."
             ),
             reply_text=reply_text,
+            requires_confirmation=False,
         )
 
 
@@ -304,6 +346,8 @@ def render_notification_reply_draft_result(result: NotificationReplyDraftResult)
         lines.append(f"event: {result.event.id} from {result.event.display_source}")
     if result.reply_text:
         lines.append(f"draft: {result.reply_text}")
+    if result.requires_confirmation:
+        lines.append("confirmation: required")
     if result.browser_plan:
         lines.append(render_browser_interaction_plan(result.browser_plan))
     if result.ref_selection:

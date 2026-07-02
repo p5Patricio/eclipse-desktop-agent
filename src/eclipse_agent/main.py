@@ -37,6 +37,8 @@ from eclipse_agent.weather import WeatherConfig, get_weather, render_weather
 from eclipse_agent.email_sender import EmailSender, SmtpConfigError
 from eclipse_agent.clipboard import WindowsClipboard, render_clipboard_result
 from eclipse_agent.audit import AuditLog, render_audit_entries
+from eclipse_agent.browser_control import BrowserControlService
+from eclipse_agent.chrome_devtools_mcp import ChromeDevToolsMCPAdapter
 from eclipse_agent.calendar_agenda import read_agenda, render_agenda_cli
 from eclipse_agent.killswitch import KillSwitch
 from eclipse_agent.push_to_talk import run_push_to_talk
@@ -2028,6 +2030,12 @@ def _build_router(args: argparse.Namespace) -> ToolRouter:
 
     audit_log = AuditLog()
     kill_switch = KillSwitch()
+    settings = load_settings(default_settings_path())
+    browser_control_service = BrowserControlService(
+        settings=settings,
+        devtools_adapter=ChromeDevToolsMCPAdapter.from_settings(settings),
+        audit_log=audit_log,
+    )
     mcp_config = getattr(args, "mcp_config", None)
     if not mcp_config and load_mcp_servers(default_mcp_config_path()):
         mcp_config = str(default_mcp_config_path())
@@ -2036,10 +2044,16 @@ def _build_router(args: argparse.Namespace) -> ToolRouter:
         if configs:
             client = CompositeMCPClient(NativeMCPClient(), MCPToolClient(configs))
             return ToolRouter(
-                mcp_client=client, audit_log=audit_log, kill_switch=kill_switch
+                mcp_client=client,
+                audit_log=audit_log,
+                kill_switch=kill_switch,
+                browser_control_service=browser_control_service,
             )
     return ToolRouter(
-        mcp_client=NativeMCPClient(), audit_log=audit_log, kill_switch=kill_switch
+        mcp_client=NativeMCPClient(),
+        audit_log=audit_log,
+        kill_switch=kill_switch,
+        browser_control_service=browser_control_service,
     )
 
 

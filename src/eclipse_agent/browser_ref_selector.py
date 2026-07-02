@@ -39,6 +39,7 @@ class BrowserRefSelection:
     candidates: tuple[BrowserRefCandidate, ...]
     purpose: BrowserRefPurpose
     threshold: int
+    source_backend: str = "normalized"
 
     @property
     def success(self) -> bool:
@@ -108,6 +109,7 @@ def select_browser_ref(
         candidates=candidates,
         purpose=purpose,
         threshold=threshold,
+        source_backend=snapshot.source_backend,
     )
 
 
@@ -130,6 +132,7 @@ def render_browser_ref_selection(selection: BrowserRefSelection) -> str:
             )
         ]
 
+    lines.append(f"snapshot_backend: {getattr(selection, 'source_backend', '') or 'normalized'}")
     for candidate in selection.candidates[:5]:
         lines.append(
             f"- {candidate.element.ref} {candidate.element.role} "

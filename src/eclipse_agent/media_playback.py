@@ -30,6 +30,7 @@ class MediaPlaybackResult:
     url: str
     message: str
     opened: bool = False
+    requires_confirmation: bool = False
 
 
 def build_media_search_url(app_name: str, query: str) -> str | None:
@@ -47,12 +48,24 @@ def open_media_search(
     *,
     launcher: object | None = None,
     dry_run: bool = True,
+    requested_interaction: str = "",
+    confirmed: bool = False,
 ) -> MediaPlaybackResult:
     """Open the app's search for ``query`` in the default browser."""
 
     cleaned = " ".join(query.split())
     if not cleaned:
         return MediaPlaybackResult(False, app_name, query, "", "Tell me what to play.")
+    interaction = requested_interaction.casefold().strip()
+    if interaction in {"play", "autoplay", "click_play", "submit", "send"} and not confirmed:
+        return MediaPlaybackResult(
+            False,
+            app_name,
+            cleaned,
+            "",
+            "Opening media search is native, but indirect play/submit actions require confirmation.",
+            requires_confirmation=True,
+        )
     url = build_media_search_url(app_name, cleaned)
     if url is None:
         return MediaPlaybackResult(
@@ -76,6 +89,8 @@ def render_media_playback_result(result: MediaPlaybackResult) -> str:
 
     status = "ok" if result.success else "failed"
     lines = [f"Media playback [{status}]: {result.message}"]
+    if result.requires_confirmation:
+        lines.append("confirmation: required")
     if result.url:
         lines.append(f"url: {result.url}")
     return "\n".join(lines)

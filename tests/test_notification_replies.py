@@ -1,11 +1,14 @@
 import json
 
+from eclipse_agent.audit import AuditLog
+from eclipse_agent.browser_control import BrowserControlService
 from eclipse_agent.notification_replies import (
     NotificationReplyWorkflow,
     reply_url_for_event,
     resolve_reply_text,
 )
 from eclipse_agent.notifications import NotificationStore, create_notification_event
+from eclipse_agent.settings import EclipseSettings
 from eclipse_agent.voice import TranscriptionResult
 from eclipse_agent.voice import ListenResult, RecordingResult
 
@@ -34,8 +37,13 @@ def test_reply_url_for_web_instagram_event():
 def test_reply_draft_without_selector_prepares_snapshot(tmp_path):
     store = NotificationStore(tmp_path / "notifications.sqlite3")
     event_id = _stored_instagram_event(store)
+    browser_control = BrowserControlService(
+        settings=EclipseSettings(browser_live_access_consent=True)
+    )
 
-    result = NotificationReplyWorkflow(store=store).prepare_reply_draft(
+    result = NotificationReplyWorkflow(
+        store=store, browser_control_service=browser_control
+    ).prepare_reply_draft(
         event_id=event_id,
         reply_text="Ahorita entro.",
     )
@@ -43,6 +51,31 @@ def test_reply_draft_without_selector_prepares_snapshot(tmp_path):
     assert result.success is True
     assert result.browser_plan is not None
     assert result.browser_plan.results[0].command[-1] == "snapshot -i"
+
+
+def test_reply_draft_without_selector_is_gated_and_audited(tmp_path):
+    store = NotificationStore(tmp_path / "notifications.sqlite3")
+    event_id = _stored_instagram_event(store)
+    audit_log = AuditLog(tmp_path / "audit.sqlite3")
+    browser_control = BrowserControlService(
+        settings=EclipseSettings(browser_live_access_consent=False),
+        audit_log=audit_log,
+    )
+
+    result = NotificationReplyWorkflow(
+        store=store, browser_control_service=browser_control
+    ).prepare_reply_draft(
+        event_id=event_id,
+        reply_text="Ahorita entro.",
+    )
+
+    assert result.success is False
+    assert result.browser_plan is None
+    assert "consent is required" in result.message
+    entries = audit_log.recent()
+    assert entries[0].action_kind == "browser_control"
+    assert entries[0].target == "notification_reply_prepare"
+    assert "instagram.com" not in entries[0].detail
 
 
 def test_reply_draft_with_selector_requires_confirmation(tmp_path):
@@ -58,6 +91,7 @@ def test_reply_draft_with_selector_requires_confirmation(tmp_path):
     assert result.success is False
     assert result.browser_plan is not None
     assert result.browser_plan.requires_confirmation is True
+    assert result.requires_confirmation is True
 
 
 def test_confirmed_reply_draft_prepares_fill_action(tmp_path):
@@ -78,6 +112,22 @@ def test_confirmed_reply_draft_prepares_fill_action(tmp_path):
         "@e7",
         "Ahorita entro.",
     )
+
+
+def test_reply_draft_send_after_fill_requires_confirmation(tmp_path):
+    store = NotificationStore(tmp_path / "notifications.sqlite3")
+    event_id = _stored_instagram_event(store)
+
+    result = NotificationReplyWorkflow(store=store).prepare_reply_draft(
+        event_id=event_id,
+        reply_text="Ahorita entro.",
+        selector="@e7",
+        send_after_fill=True,
+    )
+
+    assert result.success is False
+    assert result.requires_confirmation is True
+    assert "requires explicit confirmation" in result.message
 
 
 def test_reply_draft_auto_selects_message_input_from_snapshot_json(tmp_path):

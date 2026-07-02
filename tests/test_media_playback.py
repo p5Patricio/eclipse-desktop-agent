@@ -59,6 +59,21 @@ def test_open_media_search_dry_run_does_not_open():
     assert launcher.dry_run is True
 
 
+def test_open_media_search_keeps_indirect_play_behind_confirmation():
+    launcher = FakeLauncher()
+
+    result = open_media_search(
+        "YouTube Music",
+        "lofi",
+        launcher=launcher,
+        requested_interaction="play",
+    )
+
+    assert result.success is False
+    assert result.requires_confirmation is True
+    assert launcher.launched is None
+
+
 def test_open_media_search_empty_query_fails():
     result = open_media_search("YouTube Music", "   ", launcher=FakeLauncher())
     assert result.success is False
@@ -127,6 +142,47 @@ def test_native_play_media_speaks_result(monkeypatch):
 
     assert result.success is True
     assert "Dale play" in result.structured_content["user_facts"]["spoken"]
+
+
+def test_native_play_media_passes_interaction_and_confirmation(monkeypatch):
+    import eclipse_agent.media_playback as mp
+
+    captured = {}
+
+    def fake_open_media_search(app, query, **kwargs):
+        captured.update(kwargs)
+        return MediaPlaybackResult(
+            True,
+            app,
+            query,
+            "https://music.youtube.com/search?q=tema",
+            "ok",
+            opened=True,
+        )
+
+    monkeypatch.setattr(mp, "open_media_search", fake_open_media_search)
+
+    action = PlannedAction(
+        id="pm-confirmed",
+        kind=ActionKind.PLAY_MEDIA,
+        description="Play media.",
+        risk_level=RiskLevel.LOW,
+        target="YouTube Music",
+        parameters={
+            "query": "tema",
+            "app_name": "YouTube Music",
+            "requested_interaction": "submit",
+        },
+        tool_name="native.play_media",
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action, ToolExecutionContext(dry_run=False, confirmed=True)
+    )
+
+    assert result.success is True
+    assert captured["requested_interaction"] == "submit"
+    assert captured["confirmed"] is True
 
 
 # --- CLI -----------------------------------------------------------------

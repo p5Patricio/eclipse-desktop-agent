@@ -40,10 +40,10 @@ Chain strategy: feature-branch-chain
 
 ## Phase 3: Routing / Integrations / Fallbacks
 
-- [ ] 3.1 Modify `src/eclipse_agent/tool_router.py` to route only rich browser actions through `BrowserControlService` while preserving native simple open/search.
-- [ ] 3.2 Update `src/eclipse_agent/browser_automation.py`, `src/eclipse_agent/browser_ref_selector.py`, and `src/eclipse_agent/screen_ask.py` for fallback reason metadata, normalized snapshots, and evidence without raw page content.
-- [ ] 3.3 Update `src/eclipse_agent/media_playback.py` and `src/eclipse_agent/notification_replies.py` so simple media/search stays native and indirect submit/send actions require confirmation.
-- [ ] 3.4 Extend `tests/test_tool_router.py`, `tests/test_browser_automation.py`, `tests/test_browser_ref_selector.py`, `tests/test_screen_ask.py`, `tests/test_media_playback.py`, and `tests/test_notification_replies.py` for spec scenarios.
+- [x] 3.1 Modify `src/eclipse_agent/tool_router.py` to route only rich browser actions through `BrowserControlService` while preserving native simple open/search.
+- [x] 3.2 Update `src/eclipse_agent/browser_automation.py`, `src/eclipse_agent/browser_ref_selector.py`, and `src/eclipse_agent/screen_ask.py` for fallback reason metadata, normalized snapshots, and evidence without raw page content.
+- [x] 3.3 Update `src/eclipse_agent/media_playback.py` and `src/eclipse_agent/notification_replies.py` so simple media/search stays native and indirect submit/send actions require confirmation.
+- [x] 3.4 Extend `tests/test_tool_router.py`, `tests/test_browser_automation.py`, `tests/test_browser_ref_selector.py`, `tests/test_screen_ask.py`, `tests/test_media_playback.py`, and `tests/test_notification_replies.py` for spec scenarios.
 
 ## Phase 4: Verification / Rollout
 

@@ -69,3 +69,10 @@ def test_render_browser_ref_selection_shows_candidates():
 
     assert "Selected @e7" in rendered
     assert "Write a message" in rendered
+
+
+def test_selection_preserves_normalized_snapshot_backend():
+    snapshot = _snapshot({"e7": {"role": "textbox", "name": "Write a message"}})
+    selection = select_browser_ref(snapshot)
+
+    assert selection.source_backend == "agent_browser"

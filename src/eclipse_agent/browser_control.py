@@ -404,6 +404,7 @@ _SECRET_KEY_TOKENS = (
     "credential",
     "password",
     "secret",
+    "target",
     "token",
     "api_key",
     "apikey",

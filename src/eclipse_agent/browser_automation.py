@@ -58,6 +58,7 @@ class BrowserAutomationProfile:
     batch_snapshot_flags: tuple[str, ...] = ("-i",)
     headed: bool = False
     chrome_profile: str = ""
+    fallback_warning: str = "agent-browser is a legacy fallback backend."
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ class BrowserAutomationRequest:
     key: str | None = None
     allowed_domains: tuple[str, ...] = ()
     metadata: dict[str, str] = field(default_factory=dict)
+    fallback_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,7 @@ class BrowserAutomationResult:
     executed: bool = False
     pid: int | None = None
     metadata: dict[str, str] = field(default_factory=dict)
+    fallback_reason: str = ""
     stdout: str = ""
     stderr: str = ""
 
@@ -106,6 +109,8 @@ class BrowserSnapshot:
     origin: str
     elements: tuple[BrowserElement, ...]
     snapshot_text: str
+    source_backend: str = "agent_browser"
+    fallback_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -146,6 +151,7 @@ class AgentBrowserAdapter:
         *,
         dry_run: bool = True,
         allowed_domains: tuple[str, ...] = (),
+        fallback_reason: str = "",
     ) -> BrowserAutomationResult:
         """Open a URL in an agent-browser session."""
 
@@ -153,6 +159,7 @@ class AgentBrowserAdapter:
             kind=BrowserCommandKind.OPEN_URL,
             url=url,
             allowed_domains=allowed_domains,
+            fallback_reason=fallback_reason,
         )
         return self.run(request, dry_run=dry_run)
 
@@ -162,6 +169,7 @@ class AgentBrowserAdapter:
         *,
         dry_run: bool = True,
         allowed_domains: tuple[str, ...] = (),
+        fallback_reason: str = "",
     ) -> BrowserAutomationResult:
         """Open a web search in an agent-browser session."""
 
@@ -171,6 +179,7 @@ class AgentBrowserAdapter:
             url=url,
             query=query,
             allowed_domains=allowed_domains,
+            fallback_reason=fallback_reason,
         )
         return self.run(request, dry_run=dry_run)
 
@@ -180,6 +189,7 @@ class AgentBrowserAdapter:
         *,
         dry_run: bool = True,
         allowed_domains: tuple[str, ...] = (),
+        fallback_reason: str = "",
     ) -> BrowserAutomationResult:
         """Request an interactive semantic page snapshot from agent-browser."""
 
@@ -187,6 +197,7 @@ class AgentBrowserAdapter:
             kind=BrowserCommandKind.SNAPSHOT,
             url=url,
             allowed_domains=allowed_domains,
+            fallback_reason=fallback_reason,
         )
         return self.run(request, dry_run=dry_run)
 
@@ -196,6 +207,7 @@ class AgentBrowserAdapter:
         *,
         dry_run: bool = True,
         allowed_domains: tuple[str, ...] = (),
+        fallback_reason: str = "",
     ) -> BrowserAutomationResult:
         """Click an element ref from the latest snapshot."""
 
@@ -203,6 +215,7 @@ class AgentBrowserAdapter:
             kind=BrowserCommandKind.CLICK,
             selector=selector,
             allowed_domains=allowed_domains,
+            fallback_reason=fallback_reason,
         )
         return self.run(request, dry_run=dry_run)
 
@@ -213,6 +226,7 @@ class AgentBrowserAdapter:
         *,
         dry_run: bool = True,
         allowed_domains: tuple[str, ...] = (),
+        fallback_reason: str = "",
     ) -> BrowserAutomationResult:
         """Fill an element ref from the latest snapshot."""
 
@@ -221,6 +235,7 @@ class AgentBrowserAdapter:
             selector=selector,
             text=text,
             allowed_domains=allowed_domains,
+            fallback_reason=fallback_reason,
         )
         return self.run(request, dry_run=dry_run)
 
@@ -231,6 +246,7 @@ class AgentBrowserAdapter:
         *,
         dry_run: bool = True,
         allowed_domains: tuple[str, ...] = (),
+        fallback_reason: str = "",
     ) -> BrowserAutomationResult:
         """Type into an element ref without clearing it first."""
 
@@ -239,6 +255,7 @@ class AgentBrowserAdapter:
             selector=selector,
             text=text,
             allowed_domains=allowed_domains,
+            fallback_reason=fallback_reason,
         )
         return self.run(request, dry_run=dry_run)
 
@@ -248,6 +265,7 @@ class AgentBrowserAdapter:
         *,
         dry_run: bool = True,
         allowed_domains: tuple[str, ...] = (),
+        fallback_reason: str = "",
     ) -> BrowserAutomationResult:
         """Press a key in the current browser focus."""
 
@@ -255,6 +273,7 @@ class AgentBrowserAdapter:
             kind=BrowserCommandKind.PRESS,
             key=key,
             allowed_domains=allowed_domains,
+            fallback_reason=fallback_reason,
         )
         return self.run(request, dry_run=dry_run)
 
@@ -275,6 +294,8 @@ class AgentBrowserAdapter:
                 command=(),
                 message=str(exc),
                 dry_run=dry_run,
+                metadata=_automation_metadata(request, self.profile),
+                fallback_reason=request.fallback_reason,
             )
 
         if dry_run:
@@ -282,9 +303,14 @@ class AgentBrowserAdapter:
                 success=True,
                 kind=request.kind,
                 command=command,
-                message=f"Prepared {self.profile.backend} command.",
+                message=_automation_message(
+                    f"Prepared {self.profile.backend} command.",
+                    fallback_reason=request.fallback_reason,
+                    fallback_warning=self.profile.fallback_warning,
+                ),
                 dry_run=True,
-                metadata=request.metadata,
+                metadata=_automation_metadata(request, self.profile),
+                fallback_reason=request.fallback_reason,
             )
 
         resolved = shutil.which(self.profile.binary)
@@ -295,7 +321,8 @@ class AgentBrowserAdapter:
                 command=command,
                 message=f"Browser automation binary not found: {self.profile.binary}",
                 dry_run=False,
-                metadata=request.metadata,
+                metadata=_automation_metadata(request, self.profile),
+                fallback_reason=request.fallback_reason,
             )
 
         completed = subprocess.run(  # noqa: S603
@@ -309,13 +336,18 @@ class AgentBrowserAdapter:
             kind=request.kind,
             command=command,
             message=(
-                f"Executed {self.profile.backend} command."
+                _automation_message(
+                    f"Executed {self.profile.backend} command.",
+                    fallback_reason=request.fallback_reason,
+                    fallback_warning=self.profile.fallback_warning,
+                )
                 if completed.returncode == 0
                 else completed.stderr.strip() or f"{self.profile.backend} command failed."
             ),
             dry_run=False,
             executed=completed.returncode == 0,
-            metadata=request.metadata,
+            metadata=_automation_metadata(request, self.profile),
+            fallback_reason=request.fallback_reason,
             stdout=completed.stdout,
             stderr=completed.stderr,
         )
@@ -409,6 +441,29 @@ class AgentBrowserAdapter:
         return tuple(dict.fromkeys(domain for domain in domains if domain))
 
 
+def _automation_metadata(
+    request: BrowserAutomationRequest,
+    profile: BrowserAutomationProfile,
+) -> dict[str, str]:
+    metadata = dict(request.metadata)
+    metadata.setdefault("backend", profile.backend)
+    if request.fallback_reason:
+        metadata["fallback_reason"] = request.fallback_reason
+        metadata.setdefault("fallback_warning", profile.fallback_warning)
+    return metadata
+
+
+def _automation_message(
+    message: str,
+    *,
+    fallback_reason: str,
+    fallback_warning: str,
+) -> str:
+    if not fallback_reason:
+        return message
+    return f"{message} Fallback reason: {fallback_reason}. Warning: {fallback_warning}"
+
+
 class BrowserInteractionLoop:
     """Prepare safe browser interaction loops around snapshot refs.
 
@@ -425,10 +480,15 @@ class BrowserInteractionLoop:
         url: str,
         *,
         dry_run: bool = True,
+        fallback_reason: str = "",
     ) -> BrowserInteractionPlan:
         """Open a URL and request an interactive JSON snapshot."""
 
-        request = BrowserAutomationRequest(kind=BrowserCommandKind.SNAPSHOT, url=url)
+        request = BrowserAutomationRequest(
+            kind=BrowserCommandKind.SNAPSHOT,
+            url=url,
+            fallback_reason=fallback_reason,
+        )
         step = BrowserInteractionStep(
             kind=BrowserCommandKind.SNAPSHOT,
             description="Open URL and collect interactive semantic snapshot.",
@@ -447,6 +507,7 @@ class BrowserInteractionLoop:
         key: str | None = None,
         confirmed: bool = False,
         dry_run: bool = True,
+        fallback_reason: str = "",
     ) -> BrowserInteractionPlan:
         """Prepare a ref/key action, blocking active actions until confirmed."""
 
@@ -463,7 +524,13 @@ class BrowserInteractionLoop:
                 message=f"Unsupported interaction kind: {kind}",
             )
 
-        request = BrowserAutomationRequest(kind=kind, selector=selector, text=text, key=key)
+        request = BrowserAutomationRequest(
+            kind=kind,
+            selector=selector,
+            text=text,
+            key=key,
+            fallback_reason=fallback_reason,
+        )
         step = BrowserInteractionStep(
             kind=kind,
             description=f"Run active browser action: {kind.value}.",
@@ -522,6 +589,8 @@ def render_browser_interaction_plan(plan: BrowserInteractionPlan) -> str:
         if not result.success:
             status = "failed"
         lines.append(f"  result [{status}]: {result.message}")
+        if result.fallback_reason:
+            lines.append(f"  fallback_reason: {result.fallback_reason}")
         if result.command:
             lines.append(f"  command: {shlex_join(result.command)}")
         if not result.success:
@@ -586,8 +655,12 @@ def validate_snapshot_ref(selector: str | None) -> str:
     return selector if selector.startswith("@") else f"@{selector}"
 
 
-def parse_agent_browser_snapshot_json(raw_output: str) -> BrowserSnapshot:
-    """Parse `agent-browser snapshot --json` output into stable objects."""
+def parse_agent_browser_snapshot_json(
+    raw_output: str,
+    *,
+    fallback_reason: str = "",
+) -> BrowserSnapshot:
+    """Parse `agent-browser snapshot --json` output into a normalized snapshot."""
 
     payload = json.loads(raw_output)
     if isinstance(payload, list):
@@ -599,30 +672,59 @@ def parse_agent_browser_snapshot_json(raw_output: str) -> BrowserSnapshot:
         data = next((item for item in reversed(snapshot_results) if "refs" in item), None)
         if data is None:
             raise ValueError("No snapshot result found in agent-browser batch output.")
-        return _snapshot_from_data(data)
+        return normalize_browser_snapshot(
+            data,
+            source_backend="agent_browser",
+            fallback_reason=fallback_reason,
+        )
 
     if not payload.get("success"):
         error = payload.get("error") or "agent-browser snapshot failed"
         raise ValueError(str(error))
     data = payload.get("data") or {}
-    return _snapshot_from_data(data)
+    return normalize_browser_snapshot(
+        data,
+        source_backend="agent_browser",
+        fallback_reason=fallback_reason,
+    )
 
 
-def _snapshot_from_data(data: dict[str, object]) -> BrowserSnapshot:
-    refs = data.get("refs") or {}
+def normalize_browser_snapshot(
+    data: dict[str, object],
+    *,
+    source_backend: str,
+    fallback_reason: str = "",
+) -> BrowserSnapshot:
+    """Normalize DevTools or agent-browser snapshot shapes without raw page content."""
+
+    refs = data.get("refs") or data.get("elements") or {}
+    if isinstance(refs, list):
+        refs = {
+            str(item.get("ref") or item.get("id") or f"e{index}"): item
+            for index, item in enumerate(refs, start=1)
+            if isinstance(item, dict)
+        }
+    if not isinstance(refs, dict):
+        refs = {}
     elements = tuple(
         BrowserElement(
             ref=validate_snapshot_ref(ref),
-            role=str(value.get("role", "")),
-            name=str(value.get("name", "")),
+            role=str(value.get("role", "")) if isinstance(value, dict) else "",
+            name=str(value.get("name", "")) if isinstance(value, dict) else "",
         )
         for ref, value in refs.items()
     )
     return BrowserSnapshot(
         origin=str(data.get("origin", "")),
         elements=elements,
-        snapshot_text=str(data.get("snapshot", "")),
+        snapshot_text="",
+        source_backend=source_backend,
+        fallback_reason=fallback_reason,
     )
+
+
+def _snapshot_from_data(data: dict[str, object]) -> BrowserSnapshot:
+    return normalize_browser_snapshot(data, source_backend="agent_browser")
 
 
 def domain_from_url(url: str) -> str:

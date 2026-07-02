@@ -101,3 +101,21 @@ def test_screen_ask_window_not_found_prefix() -> None:
     assert result.success is True
     assert "Nonexistent App" in result.answer
     assert "not found" in result.answer
+
+
+def test_screen_ask_records_privacy_safe_fallback_evidence() -> None:
+    vision = _FakeVision(success=True, text="A browser page is visible.")
+    capture = _FakeCapture()
+
+    result = ask_about_screen(
+        "answer safely",
+        capture=capture,
+        vision=vision,
+        fallback_reason="devtools_unavailable",
+    )
+
+    assert result.success is True
+    assert result.fallback_reason == "devtools_unavailable"
+    assert result.evidence["backend"] == "vision"
+    assert result.evidence["fallback_reason"] == "devtools_unavailable"
+    assert "raw_page_content" not in result.evidence

@@ -9,6 +9,13 @@ from eclipse_agent.planner import (
     create_action_plan,
 )
 from eclipse_agent.safety import RiskLevel
+from eclipse_agent.browser_control import (
+    BrowserBackend,
+    BrowserControlService,
+    BrowserControlResult,
+    BrowserSessionMode,
+)
+from eclipse_agent.settings import EclipseSettings, save_mcp_servers, save_settings
 from eclipse_agent.tool_router import (
     CompositeMCPClient,
     MCPToolDefinition,
@@ -141,6 +148,289 @@ def test_tool_router_prepares_matching_mcp_tool_without_execution():
     assert result.executed is False
     assert client.calls == []
     assert "Prepared MCP tool call" in result.message
+
+
+def test_tool_router_prefers_native_for_simple_browser_open(monkeypatch):
+    from eclipse_agent.desktop_control import DesktopLaunchResult
+    from eclipse_agent.pal.factory import PlatformFactory
+
+    launched: list[str] = []
+
+    class FakeLauncher:
+        def launch(self, app_name, args=(), *, dry_run=True):
+            launched.append(app_name)
+            return DesktopLaunchResult(
+                success=True,
+                app_name=app_name,
+                command=(),
+                message="opened",
+                dry_run=dry_run,
+            )
+
+    monkeypatch.setattr(PlatformFactory, "get_app_launcher", lambda: FakeLauncher())
+    client = CompositeMCPClient(NativeMCPClient(), FakeMCPClient((_browser_open_tool(),)))
+    action = PlannedAction(
+        id="open-1",
+        kind=ActionKind.OPEN_WEB_APP,
+        description="Open Instagram.",
+        risk_level=RiskLevel.LOW,
+        target="instagram",
+        parameters={"url": "https://www.instagram.com/"},
+        tool_name="browser.open_url",
+    )
+
+    result = ToolRouter(mcp_client=client).route_action(
+        action,
+        ToolExecutionContext(dry_run=False),
+    )
+
+    assert result.tool_name == "native.open_url"
+    assert launched == ["https://www.instagram.com/"]
+
+
+def test_tool_router_routes_rich_browser_action_through_browser_control_service():
+    class FakeBrowserControlService:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def evaluate_request(self, request, *, confirmed=False):
+            self.requests.append((request, confirmed))
+            return BrowserControlResult(
+                success=False,
+                backend=BrowserBackend.CHROME_DEVTOOLS,
+                mode=BrowserSessionMode.MANAGED,
+                message="Confirmation required before Eclipse can submit.",
+                requires_confirmation=True,
+                audit_detail="{}",
+            )
+
+    service = FakeBrowserControlService()
+    client = FakeMCPClient((_browser_open_tool(),))
+    action = PlannedAction(
+        id="browser-rich-1",
+        kind=ActionKind.OPEN_WEB_APP,
+        description="Submit a browser form.",
+        risk_level=RiskLevel.HIGH,
+        target="https://example.com/form",
+        parameters={
+            "url": "https://example.com/form",
+            "browser_action": "submit",
+            "selector": "@e1",
+            "rich_browser_control": True,
+        },
+    )
+
+    result = ToolRouter(
+        mcp_client=client,
+        browser_control_service=service,  # type: ignore[arg-type]
+    ).route_action(action, ToolExecutionContext(dry_run=True, confirmed=True))
+
+    assert result.tool_name == "browser_control.chrome_devtools"
+    assert result.requires_confirmation is True
+    assert client.calls == []
+    assert service.requests[0][0].requires_live_browser is True
+
+
+def test_rich_browser_metadata_does_not_leak_raw_token_target():
+    token_url = "https://example.com/callback?token=sk-secret"
+    service = BrowserControlService(
+        settings=EclipseSettings(
+            browser_live_access_consent=False,
+            browser_allow_vision_fallback=False,
+            browser_allow_agent_browser_fallback=False,
+        )
+    )
+    action = PlannedAction(
+        id="browser-rich-redact",
+        kind=ActionKind.OPEN_WEB_APP,
+        description="Inspect a token URL.",
+        risk_level=RiskLevel.LOW,
+        target=token_url,
+        parameters={"url": token_url, "rich_browser_control": True},
+    )
+
+    result = ToolRouter(
+        mcp_client=FakeMCPClient((_browser_open_tool(),)),
+        browser_control_service=service,
+    ).route_action(action, ToolExecutionContext(dry_run=True))
+
+    rendered = f"{result.metadata} {result.structured_content}"
+    assert "target" not in result.metadata
+    assert "sk-secret" not in rendered
+    assert "example.com" not in rendered
+    assert "token" not in rendered
+
+
+def test_rich_browser_router_audit_redacts_raw_token_target(tmp_path):
+    from eclipse_agent.audit import AuditLog
+
+    token_url = "https://example.com/callback?token=sk-secret"
+    audit_log = AuditLog(tmp_path / "audit.sqlite3")
+    service = BrowserControlService(
+        settings=EclipseSettings(
+            browser_live_access_consent=False,
+            browser_allow_vision_fallback=False,
+            browser_allow_agent_browser_fallback=False,
+        )
+    )
+    action = PlannedAction(
+        id="browser-rich-audit-redact",
+        kind=ActionKind.OPEN_WEB_APP,
+        description="Inspect a token URL.",
+        risk_level=RiskLevel.LOW,
+        target=token_url,
+        parameters={"url": token_url, "rich_browser_control": True},
+    )
+
+    ToolRouter(
+        mcp_client=FakeMCPClient((_browser_open_tool(),)),
+        audit_log=audit_log,
+        browser_control_service=service,
+    ).route_action(action, ToolExecutionContext(dry_run=True))
+
+    entries = audit_log.recent()
+    assert entries[0].tool_name == "browser_control.chrome_devtools"
+    assert entries[0].target == "[redacted]"
+    rendered = f"{entries[0].target} {entries[0].detail}"
+    assert "sk-secret" not in rendered
+    assert "example.com" not in rendered
+
+
+def test_rich_browser_router_audit_redacts_confirmation_message_url(tmp_path):
+    from eclipse_agent.audit import AuditLog
+
+    token_url = "https://example.com/callback?token=sk-secret"
+    audit_log = AuditLog(tmp_path / "audit.sqlite3")
+    service = BrowserControlService(
+        settings=EclipseSettings(
+            browser_live_access_consent=True,
+            browser_allow_vision_fallback=False,
+            browser_allow_agent_browser_fallback=False,
+        )
+    )
+    action = PlannedAction(
+        id="browser-rich-audit-detail-redact",
+        kind=ActionKind.OPEN_WEB_APP,
+        description="Submit a token URL.",
+        risk_level=RiskLevel.LOW,
+        target=token_url,
+        parameters={
+            "url": token_url,
+            "browser_action": "submit",
+            "rich_browser_control": True,
+        },
+    )
+
+    ToolRouter(
+        mcp_client=FakeMCPClient((_browser_open_tool(),)),
+        audit_log=audit_log,
+        browser_control_service=service,
+    ).route_action(action, ToolExecutionContext(dry_run=True, confirmed=False))
+
+    entry = audit_log.recent()[0]
+    assert entry.tool_name == "browser_control.chrome_devtools"
+    assert entry.target == "[redacted]"
+    assert "sk-secret" not in entry.detail
+    assert "example.com" not in entry.detail
+    assert "token" not in entry.detail
+    assert "confirmation_state" in entry.detail
+
+
+def test_false_like_browser_flags_do_not_force_rich_routing():
+    action = PlannedAction(
+        id="browser-false-flags",
+        kind=ActionKind.OPEN_WEB_APP,
+        description="Open docs.",
+        risk_level=RiskLevel.LOW,
+        target="https://example.com/docs",
+        parameters={
+            "url": "https://example.com/docs",
+            "rich_browser_control": "false",
+            "requires_live_browser": "0",
+        },
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action, ToolExecutionContext(dry_run=True)
+    )
+
+    assert result.tool_name == "native.open_url"
+    assert result.success is True
+
+
+def test_false_like_sensitive_parameter_remains_non_sensitive():
+    class FakeBrowserControlService:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def evaluate_request(self, request, *, confirmed=False):
+            self.requests.append(request)
+            return BrowserControlResult(
+                success=True,
+                backend=BrowserBackend.CHROME_DEVTOOLS,
+                mode=BrowserSessionMode.MANAGED,
+                message="ok",
+                audit_detail="{}",
+            )
+
+    service = FakeBrowserControlService()
+    action = PlannedAction(
+        id="browser-sensitive-false",
+        kind=ActionKind.OPEN_WEB_APP,
+        description="Click a browser control.",
+        risk_level=RiskLevel.LOW,
+        target="browser",
+        parameters={"browser_action": "click", "sensitive": "no"},
+    )
+
+    ToolRouter(
+        mcp_client=FakeMCPClient((_browser_open_tool(),)),
+        browser_control_service=service,  # type: ignore[arg-type]
+    ).route_action(action, ToolExecutionContext(dry_run=True))
+
+    assert service.requests[0].sensitive is False
+
+
+def test_browser_search_with_only_text_value_stays_native():
+    action = PlannedAction(
+        id="browser-search-native",
+        kind=ActionKind.BROWSER_SEARCH,
+        description="Search the web.",
+        risk_level=RiskLevel.LOW,
+        target="browser",
+        parameters={"text": "weather", "value": "weather"},
+    )
+
+    result = ToolRouter(mcp_client=NativeMCPClient()).route_action(
+        action, ToolExecutionContext(dry_run=True)
+    )
+
+    assert result.tool_name == "native.open_url"
+
+
+def test_build_router_injects_configured_browser_control_service(monkeypatch, tmp_path):
+    import argparse
+    import eclipse_agent.main as main_mod
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    save_settings(
+        EclipseSettings(
+            browser_live_access_consent=True,
+            browser_devtools_mcp_server="chrome-devtools",
+        )
+    )
+    save_mcp_servers(
+        [{"name": "chrome-devtools", "command": "npx", "args": ["chrome-devtools-mcp"]}]
+    )
+
+    router = main_mod._build_router(argparse.Namespace(mcp_config=None))
+
+    assert router.browser_control_service is not None
+    assert router.browser_control_service.settings.browser_live_access_consent is True
+    adapter = router.browser_control_service.devtools_adapter
+    assert adapter is not None
+    assert adapter.session_config.server_name == "chrome-devtools"
+    assert [config.name for config in adapter.server_configs] == ["chrome-devtools"]
 
 
 def test_tool_router_executes_confirmed_mcp_tool():
@@ -688,7 +978,7 @@ def test_native_answer_question_uses_llm(monkeypatch):
         description="Answer a question.",
         risk_level=RiskLevel.LOW,
         target="answer",
-        parameters={"question": "qué es la albahaca"},
+        parameters={"question": "quÃ© es la albahaca"},
         tool_name="native.answer_question",
     )
 
@@ -803,4 +1093,3 @@ def test_native_mcp_client_routes_via_pal(monkeypatch):
     )
     assert res.isError is False
     assert ("test.png", False) in captured_paths
-

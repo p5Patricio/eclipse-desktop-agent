@@ -108,6 +108,20 @@ def test_agent_browser_search_builds_search_url(tmp_path):
     assert "www.google.com" in result.command[4]
 
 
+def test_agent_browser_fallback_metadata_is_preserved():
+    adapter = AgentBrowserAdapter()
+
+    result = adapter.snapshot(
+        "https://example.com",
+        dry_run=True,
+        fallback_reason="devtools_unavailable",
+    )
+
+    assert result.fallback_reason == "devtools_unavailable"
+    assert result.metadata["fallback_reason"] == "devtools_unavailable"
+    assert "legacy fallback" in result.metadata["fallback_warning"]
+
+
 def test_agent_browser_rejects_unsafe_url_scheme():
     adapter = AgentBrowserAdapter()
 
@@ -287,3 +301,26 @@ def test_parse_agent_browser_batch_json_output():
 
     assert snapshot.elements[0].ref == "@e2"
     assert snapshot.elements[0].name == "Learn more"
+
+
+def test_parse_agent_browser_snapshot_drops_raw_snapshot_text():
+    raw_output = """
+{
+  "success": true,
+  "data": {
+    "origin": "https://example.com/",
+    "refs": {"e1": {"name": "Secret page text", "role": "heading"}},
+    "snapshot": "full raw accessibility dump should not be retained"
+  },
+  "error": null
+}
+"""
+
+    snapshot = parse_agent_browser_snapshot_json(
+        raw_output,
+        fallback_reason="missing_devtools_tools",
+    )
+
+    assert snapshot.snapshot_text == ""
+    assert snapshot.source_backend == "agent_browser"
+    assert snapshot.fallback_reason == "missing_devtools_tools"
